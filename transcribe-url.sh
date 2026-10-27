@@ -34,7 +34,7 @@ resolve_self_dir() {
 }
 
 PROG="$(basename "$0")"
-VERSION="0.2.0"
+VERSION="0.3.0"
 SELF_DIR="$(resolve_self_dir "$0")"
 RENDER="$SELF_DIR/lib/render.py"
 MERGE_CHUNKS="$SELF_DIR/lib/merge_chunks.py"
