@@ -1,0 +1,11 @@
+{
+  "text": "First window begins here and keeps going. Second segment inside the same window. Third segment, still the same window. Fourth segment closes the forty-five second window. Fifth segment starts a new window.",
+  "language": "en",
+  "segments": [
+    {"id": 0, "start": 0.0, "end": 12.0, "text": " First window begins here and keeps going."},
+    {"id": 1, "start": 12.0, "end": 24.0, "text": " Second segment inside the same window."},
+    {"id": 2, "start": 24.0, "end": 36.0, "text": " Third segment, still the same window."},
+    {"id": 3, "start": 36.0, "end": 48.0, "text": " Fourth segment closes the forty-five second window."},
+    {"id": 4, "start": 48.0, "end": 58.0, "text": " Fifth segment starts a new window."}
+  ]
+}

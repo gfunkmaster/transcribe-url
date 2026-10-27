@@ -1,0 +1,11 @@
+{
+  "extractor_key": "Twitter",
+  "extractor": "twitter",
+  "id": "999",
+  "title": "Tweet video: no timestamped URL scheme",
+  "uploader": "someone",
+  "upload_date": "20260103",
+  "duration": 58,
+  "webpage_url": "https://x.com/someone/status/999",
+  "language": "en"
+}

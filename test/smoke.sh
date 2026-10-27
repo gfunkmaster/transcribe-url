@@ -106,6 +106,129 @@ else
     no "output files written even though the run failed"
 fi
 
+# --- offline: new CLI surface ----------------------------------------------
+printf '\nmd/jsonl CLI validation\n'
+case_ 1 "unsupported format" "bad format in -f is rejected" "$SCRIPT" -f md,docx https://example.com
+case_ 1 "unsupported format" "bad --emit value is rejected" "$SCRIPT" --emit docx https://example.com
+case_ 2 "needs a value" "--window without a value exits 2" "$SCRIPT" --window
+case_ 1 "whole number" "--window rejects non-numeric values" "$SCRIPT" --window abc https://example.com
+case_ 1 "greater than 0" "--window 0 is rejected" "$SCRIPT" --window 0 https://example.com
+
+# --- offline: renderer unit tests (segment merging, metadata, deep links) ----
+printf '\nRenderer (md/jsonl)\n'
+if ! command -v python3 >/dev/null 2>&1; then
+    printf '  skip  renderer tests (python3 not on PATH)\n'
+else
+    R="$TMP/render"
+    FIX="$ROOT/test/fixtures"
+
+    python3 "$ROOT/lib/render.py" --segments "$FIX/segments.json" \
+        --info "$FIX/info-youtube.json" --window 45 --outdir "$R/yt" --base v \
+        --formats md,jsonl --model test-model --audio-sha256 abc123 \
+        --transcribed-at 2026-01-01T00:00:00Z >/dev/null 2>&1
+    python3 "$ROOT/lib/render.py" --segments "$FIX/segments.json" \
+        --info "$FIX/info-twitter.json" --window 45 --outdir "$R/tw" --base t \
+        --formats md >/dev/null 2>&1
+    python3 "$ROOT/lib/render.py" --segments "$FIX/segments.json" \
+        --info "$FIX/info-youtube.json" --window 20 --outdir "$R/w20" --base w20 \
+        --formats jsonl >/dev/null 2>&1
+
+    if [ -f "$R/yt/v.md" ] && [ -f "$R/yt/v.jsonl" ]; then
+        ok "renderer writes md and jsonl"
+    else
+        no "renderer did not write the requested files"
+    fi
+
+    n="$(wc -l <"$R/yt/v.jsonl" 2>/dev/null | tr -d ' ')"
+    if [ "$n" = "2" ]; then
+        ok "45 s window merges 5 segments into 2 windows"
+    else
+        no "expected 2 windows at --window 45, got ${n:-0}"
+    fi
+
+    if head -1 "$R/yt/v.jsonl" | grep -qF '"start": 0.0, "end": 48.0'; then
+        ok "window keeps first start and last end (0.0-48.0)"
+    else
+        no "first window boundaries are wrong: $(head -1 "$R/yt/v.jsonl")"
+    fi
+
+    n="$(wc -l <"$R/w20/w20.jsonl" 2>/dev/null | tr -d ' ')"
+    if [ "$n" = "3" ]; then
+        ok "--window 20 changes the merge width"
+    else
+        no "expected 3 windows at --window 20, got ${n:-0}"
+    fi
+
+    missing=""
+    for key in source_url extractor id uploader upload_date duration duration_seconds \
+               language model audio_sha256 transcribed_at; do
+        grep -q "^$key: " "$R/yt/v.md" || missing="$missing $key"
+    done
+    if [ -z "$missing" ]; then
+        ok "frontmatter carries all provenance fields"
+    else
+        no "frontmatter missing:$missing"
+    fi
+
+    if grep -qF 'upload_date: "2026-01-02"' "$R/yt/v.md" &&
+        grep -qF 'source_url: "https://www.youtube.com/watch?v=vid123"' "$R/yt/v.md" &&
+        grep -qF 'duration_seconds: 58' "$R/yt/v.md"; then
+        ok "metadata comes from the yt-dlp info JSON"
+    else
+        no "metadata does not match the info JSON fixture"
+    fi
+
+    if grep -qF 'watch?v=vid123&t=0s' "$R/yt/v.md" && grep -qF 'watch?v=vid123&t=48s' "$R/yt/v.md"; then
+        ok "YouTube output gets timestamped deep links"
+    else
+        no "missing YouTube deep links"
+    fi
+
+    if grep -q 't=[0-9]*s' "$R/tw/t.md"; then
+        no "X/Twitter output must not contain timestamped deep links"
+    else
+        ok "X/Twitter output has no deep links (none exist)"
+    fi
+
+    if python3 - "$R/yt/v.jsonl" <<'PY'
+import json, sys
+rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8")]
+required = {"start", "end", "text", "source_url", "id"}
+assert rows, "no rows"
+assert all(required <= set(r) for r in rows), "missing keys"
+assert all(r["end"] > r["start"] for r in rows), "bad windows"
+PY
+    then
+        ok "jsonl rows are valid JSON with the required keys"
+    else
+        no "jsonl rows are malformed"
+    fi
+
+    # Silent / non-speech audio produces no segments: that must not fail the run.
+    printf '{"language": "en", "segments": []}' >"$R/empty.json"
+    if python3 "$ROOT/lib/render.py" --segments "$R/empty.json" \
+        --info "$FIX/info-youtube.json" --window 45 --outdir "$R/empty" --base e \
+        --formats md,jsonl >/dev/null 2>&1; then
+        ok "empty transcript (silence) is not an error"
+    else
+        no "empty transcript should render empty outputs, not fail"
+    fi
+    if [ -f "$R/empty/e.md" ] && [ ! -s "$R/empty/e.jsonl" ]; then
+        ok "empty transcript still writes frontmatter with no windows"
+    else
+        no "empty transcript should produce md with zero windows"
+    fi
+
+    # Malformed input (missing key) is a real error.
+    printf '{"language": "en"}' >"$R/bad.json"
+    if python3 "$ROOT/lib/render.py" --segments "$R/bad.json" --window 45 \
+        --outdir "$R/bad" --base b --formats md >/dev/null 2>&1; then
+        no "transcript without a segments key should fail"
+    else
+        ok "transcript without a segments key is rejected"
+    fi
+fi
+
 # --- optional: real pipeline ------------------------------------------------
 if [ "${SMOKE_NETWORK:-0}" = "1" ]; then
     printf '\nEnd-to-end (network, whisper-tiny)\n'
@@ -129,6 +252,21 @@ if [ "${SMOKE_NETWORK:-0}" = "1" ]; then
         case_ 0 "" "--no-condition is accepted" \
             "$SCRIPT" --no-condition -m mlx-community/whisper-tiny -f txt \
             -o "$TMP/e2e/out2" "$TMP/e2e/fixture.wav"
+
+        case_ 0 "" "md + jsonl emitted alongside txt" \
+            "$SCRIPT" -m mlx-community/whisper-tiny --emit md,jsonl --window 15 \
+            -f txt -o "$TMP/e2e/out4" "$TMP/e2e/fixture.wav"
+        if [ -f "$TMP/e2e/out4/fixture.md" ] && [ -f "$TMP/e2e/out4/fixture.jsonl" ] \
+            && [ -f "$TMP/e2e/out4/fixture.txt" ]; then
+            ok "md, jsonl and txt written in one pass"
+        else
+            no "expected md, jsonl and txt outputs"
+        fi
+        if grep -q '^source_url: ' "$TMP/e2e/out4/fixture.md" 2>/dev/null; then
+            ok "md frontmatter has source_url"
+        else
+            no "md frontmatter missing source_url"
+        fi
 
         case_ 1 "" "nonexistent model id fails with exit 1" \
             "$SCRIPT" -m mlx-community/whisper-small-does-not-exist -f txt \

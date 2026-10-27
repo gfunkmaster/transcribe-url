@@ -12,8 +12,13 @@
 *.json
 !package.json
 
-# keep the test fixture
+# keep the test fixtures (JSON fixtures would otherwise be ignored above)
 !test/fixtures/*.wav
+!test/fixtures/*.json
+
+# python
+__pycache__/
+*.pyc
 
 # macOS
 .DS_Store

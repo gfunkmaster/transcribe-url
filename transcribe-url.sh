@@ -18,9 +18,31 @@
 #
 set -euo pipefail
 
+# Resolve the real script directory even when invoked through the install.sh
+# symlink, so lib/render.py next to the script is always found.
+resolve_self_dir() {
+    local target="$1" link_dir resolved
+    while [ -L "$target" ]; do
+        link_dir="$(cd -P "$(dirname "$target")" && pwd)"
+        resolved="$(readlink "$target")"
+        case "$resolved" in
+            /*) target="$resolved" ;;
+            *) target="$link_dir/$resolved" ;;
+        esac
+    done
+    cd -P "$(dirname "$target")" && pwd
+}
+
 PROG="$(basename "$0")"
+SELF_DIR="$(resolve_self_dir "$0")"
+RENDER="$SELF_DIR/lib/render.py"
 DEFAULT_MODEL="mlx-community/whisper-large-v3-turbo"
-VALID_FORMATS="txt vtt srt tsv json"
+DEFAULT_WINDOW=45
+# Written by mlx-whisper itself.
+MLX_FORMATS="txt vtt srt tsv json"
+# Written by lib/render.py from the transcript plus yt-dlp metadata.
+EXTRA_FORMATS="md jsonl"
+VALID_FORMATS="$MLX_FORMATS $EXTRA_FORMATS"
 
 # Measured on this machine: Hugging Face's Xet backend stalls mid-download for
 # multi-GB weight files (0 B/s at ~88 MB), while the plain HTTP path sustains
@@ -40,7 +62,9 @@ Options:
   -m, --model MODEL          Whisper model/repo (default: \$TRANSCRIBE_MODEL
                              or $DEFAULT_MODEL)
   -f, --formats LIST         Comma-separated output formats, any of:
-                             txt,vtt,srt,tsv,json (default: txt,srt)
+                             txt,vtt,srt,tsv,json,md,jsonl (default: txt,srt)
+      --emit LIST            Shorthand to add agent-friendly outputs (md,jsonl)
+      --window SECONDS       Window width for md/jsonl merging (default: 45)
   -l, --language LANG        Spoken language, e.g. en, sv (default: auto-detect)
       --no-condition         Disable condition_on_previous_text (prevents Whisper
                              degeneration into one-word segments; automatic for
@@ -74,6 +98,12 @@ Notes:
     mlx-community/whisper-small-mlx, mlx-community/whisper-base-mlx,
     mlx-community/whisper-tiny (note the -mlx / -fp16 suffixes; plain
     "whisper-small" does not exist in the mlx-community org).
+  * md/jsonl merge Whisper's very short segments into ~--window second windows
+    (cutting only on segment boundaries). They need python3 and read metadata
+    from the yt-dlp info JSON, never guessing values.
+  * Timestamped deep links are emitted only for extractors that support them
+    (currently YouTube). X/Twitter has no timestamped URL scheme, so md output
+    keeps the plain [mm:ss] anchor plus the source URL.
 EOF
 }
 
@@ -91,9 +121,22 @@ need_value() {
     }
 }
 
+# sha256_of <file> - integrity checksum, never used as a cache key
+sha256_of() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        printf 'unavailable'
+    fi
+}
+
 MODEL="${TRANSCRIBE_MODEL:-$DEFAULT_MODEL}"
 OUTDIR="."
 FORMATS="txt,srt"
+EMIT=""
+WINDOW="$DEFAULT_WINDOW"
 LANGUAGE=""
 COOKIES_BROWSER=""
 FIRST_ONLY=0
@@ -105,6 +148,8 @@ while [ $# -gt 0 ]; do
         -o|--output-dir)        need_value "$@"; OUTDIR="$2"; shift 2 ;;
         -m|--model)             need_value "$@"; MODEL="$2"; shift 2 ;;
         -f|--formats)           need_value "$@"; FORMATS="$2"; shift 2 ;;
+        --emit)                 need_value "$@"; EMIT="$2"; shift 2 ;;
+        --window)               need_value "$@"; WINDOW="$2"; shift 2 ;;
         -l|--language)          need_value "$@"; LANGUAGE="$2"; shift 2 ;;
         --cookies-from-browser) need_value "$@"; COOKIES_BROWSER="$2"; shift 2 ;;
         --first-only)           FIRST_ONLY=1; shift ;;
@@ -123,9 +168,19 @@ done
 
 # Validate the arguments before touching the environment: a typo in -f should be
 # reported as such, even on a machine that has no dependencies installed.
-REQUESTED=()
+case "$WINDOW" in
+    ''|*[!0-9]*) die "--window needs a whole number of seconds (got '$WINDOW')" ;;
+esac
+[ "$WINDOW" -gt 0 ] || die "--window must be greater than 0"
+
+REQUESTED_MLX=()
+REQUESTED_EXTRA=()
 SEEN_FORMATS=" "
-IFS=',' read -r -a _formats <<< "$FORMATS"
+FORMATS_ALL="$FORMATS"
+if [ -n "$EMIT" ]; then
+    FORMATS_ALL="$FORMATS_ALL,$EMIT"
+fi
+IFS=',' read -r -a _formats <<< "$FORMATS_ALL"
 for f in "${_formats[@]}"; do
     f="$(printf '%s' "$f" | tr -d '[:space:]')"
     [ -n "$f" ] || continue
@@ -135,18 +190,30 @@ for f in "${_formats[@]}"; do
     esac
     # Skip duplicates so "-f txt,srt,txt" writes each file once.
     case "$SEEN_FORMATS" in
-        *" $f "*) ;;
-        *) SEEN_FORMATS="$SEEN_FORMATS$f "; REQUESTED+=("$f") ;;
+        *" $f "*) continue ;;
+    esac
+    SEEN_FORMATS="$SEEN_FORMATS$f "
+    case " $MLX_FORMATS " in
+        *" $f "*) REQUESTED_MLX+=("$f") ;;
+        *) REQUESTED_EXTRA+=("$f") ;;
     esac
 done
-[ ${#REQUESTED[@]} -gt 0 ] || die "no output formats requested"
+if [ ${#REQUESTED_MLX[@]} -eq 0 ] && [ ${#REQUESTED_EXTRA[@]} -eq 0 ]; then
+    die "no output formats requested"
+fi
 
 # --- preflight ------------------------------------------------------------
 YTDLP="$(command -v yt-dlp || true)"
 MLX="$(command -v mlx_whisper || true)"
+PYTHON=""
 [ -n "$YTDLP" ] || die "yt-dlp not found (brew install yt-dlp)"
 [ -n "$MLX" ]   || die "mlx_whisper not found (uv tool install --python 3.13 mlx-whisper)"
 command -v ffmpeg >/dev/null 2>&1 || die "ffmpeg not found (brew install ffmpeg)"
+if [ ${#REQUESTED_EXTRA[@]} -gt 0 ]; then
+    PYTHON="$(command -v python3 || true)"
+    [ -n "$PYTHON" ] || die "python3 is required for md/jsonl output (brew install python)"
+    [ -f "$RENDER" ] || die "renderer missing: $RENDER (is the repo complete?)"
+fi
 
 mkdir -p "$OUTDIR"
 OUTDIR="$(cd "$OUTDIR" && pwd)"
@@ -169,6 +236,12 @@ trap cleanup EXIT
 # --quiet) so long downloads do not look frozen.
 dl_args=(-f bestaudio/best -x --audio-format wav
          --postprocessor-args "-ar 16000 -ac 1" --no-warnings)
+
+# md/jsonl frontmatter comes from yt-dlp's own info JSON (same request, no extra
+# network call). Only requested when those formats are actually needed.
+if [ ${#REQUESTED_EXTRA[@]} -gt 0 ]; then
+    dl_args+=(--write-info-json)
+fi
 
 exit_status=0
 processed=0
@@ -260,7 +333,7 @@ for src in "$@"; do
             continue
         fi
 
-        for f in "${REQUESTED[@]}"; do
+        for f in "${REQUESTED_MLX[@]}"; do
             if [ -f "$WORK/$out_base.$f" ]; then
                 cp "$WORK/$out_base.$f" "$OUTDIR/"
                 printf -- '    wrote %s\n' "$OUTDIR/$out_base.$f"
@@ -273,6 +346,37 @@ for src in "$@"; do
         if [ "$item_failed" -ne 0 ]; then
             printf '       (check that the model id exists: mlx-community repos use\n' >&2
             printf '        -mlx/-fp16 suffixes, e.g. whisper-small-mlx)\n' >&2
+        fi
+
+        # md/jsonl: merged windows + provenance, rendered from the transcript and
+        # the info JSON that yt-dlp wrote during the download.
+        if [ ${#REQUESTED_EXTRA[@]} -gt 0 ] && [ "$item_failed" -eq 0 ]; then
+            info_json="${audio%.*}.info.json"
+            if [ ! -f "$info_json" ]; then
+                info_json="-"
+            fi
+            extra_list="$(printf '%s,' "${REQUESTED_EXTRA[@]}")"
+            extra_list="${extra_list%,}"
+            source_for_render="$src"
+            if ! "$PYTHON" "$RENDER" --segments "$WORK/$out_base.json" \
+                    --info "$info_json" --window "$WINDOW" \
+                    --outdir "$OUTDIR" --base "$out_base" --formats "$extra_list" \
+                    --model "$MODEL" --audio-sha256 "$(sha256_of "$audio")" \
+                    --transcribed-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                    --source "$source_for_render" \
+                    >"$WORK/render.out" 2>"$WORK/render.err"; then
+                printf 'error: could not render %s for %s\n' "$extra_list" "$out_base" >&2
+                sed 's/^/       /' "$WORK/render.out" "$WORK/render.err" >&2
+                item_failed=1
+            else
+                # stdout is the list of written files; stderr carries notices.
+                while IFS= read -r written; do
+                    printf -- '    wrote %s\n' "$written"
+                done <"$WORK/render.out"
+                if [ -s "$WORK/render.err" ]; then
+                    sed 's/^/    /' "$WORK/render.err"
+                fi
+            fi
         fi
 
         # Drop intermediates for this item before moving on.

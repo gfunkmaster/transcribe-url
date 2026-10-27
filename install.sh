@@ -87,6 +87,13 @@ else
         || die "mlx_whisper still not on PATH - add \$HOME/.local/bin to your PATH"
 fi
 
+# python3 is only needed for the md/jsonl outputs, so it is a soft requirement.
+if command -v python3 >/dev/null 2>&1; then
+    info "python3 found: $(command -v python3)"
+else
+    warn "python3 not found - only needed for md/jsonl output (brew install python)"
+fi
+
 # --- link the command -------------------------------------------------------
 if [ "$CHECK_ONLY" -eq 1 ]; then
     if [ "$MISSING" -ne 0 ]; then

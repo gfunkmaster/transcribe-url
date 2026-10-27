@@ -1,0 +1,11 @@
+{
+  "extractor_key": "Youtube",
+  "extractor": "youtube",
+  "id": "vid123",
+  "title": "Test Lecture: deep links work here",
+  "uploader": "Test Channel",
+  "upload_date": "20260102",
+  "duration": 58,
+  "webpage_url": "https://www.youtube.com/watch?v=vid123",
+  "language": "en"
+}
