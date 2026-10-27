@@ -4,6 +4,29 @@ All notable changes to this project. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-10-27
+
+### Changed
+
+- **Default output layout.** Transcripts no longer land in the current directory.
+  The new default is `./transcripts/<extractor>-<id>/`, i.e. one folder per source,
+  so batches, multi-video posts and chunked runs stay separable. Folder names come
+  from yt-dlp's `extractor_key` + media `id` (`youtube-…`, `twitter-…`,
+  `twitter:spaces-…`), or `local-<filename>` for files passed in directly.
+  This is a breaking change for scripts that read files from the old location.
+- `-o DIR` now means `DIR/<extractor>-<id>/`; the per-source folder is created only
+  when there is something to write, so a failed run leaves no empty directory.
+- `--dry-run` prints the resolved layout (`outdir:  …/<extractor>-<id>/`).
+
+### Added
+
+- `--flat` — keep the pre-0.4 behaviour and write directly into the output dir.
+- `TRANSCRIBE_OUTDIR` — override the default output directory per environment.
+- Offline tests for the layout: dry-run paths, `--flat`, `TRANSCRIBE_OUTDIR`,
+  `-o` precedence, and `--version`; end-to-end assertions for the per-source folder.
+- Smoke-test robustness: the temp-dir leak check tolerates a concurrent run cleaning
+  up its own directory (it now fails only when the count grows).
+
 ## [0.3.0] - 2026-10-27
 
 ### Added

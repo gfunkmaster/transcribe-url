@@ -34,12 +34,15 @@ resolve_self_dir() {
 }
 
 PROG="$(basename "$0")"
-VERSION="0.3.0"
+VERSION="0.4.0"
 SELF_DIR="$(resolve_self_dir "$0")"
 RENDER="$SELF_DIR/lib/render.py"
 MERGE_CHUNKS="$SELF_DIR/lib/merge_chunks.py"
 DEFAULT_MODEL="mlx-community/whisper-large-v3-turbo"
 DEFAULT_WINDOW=45
+# Outputs land in ./transcripts/<extractor>-<id>/ unless TRANSCRIBE_OUTDIR or -o
+# says otherwise, so a run never scatters transcript files into the cwd.
+DEFAULT_OUTDIR="./transcripts"
 # Written by mlx-whisper itself.
 MLX_FORMATS="txt vtt srt tsv json"
 # Written by lib/render.py from the transcript plus yt-dlp metadata.
@@ -60,7 +63,10 @@ Download audio from URL(s) with yt-dlp and transcribe it locally with Whisper.
 Existing local audio/video files are transcribed directly (no download).
 
 Options:
-  -o, --output-dir DIR       Where to write transcripts (default: .)
+  -o, --output-dir DIR       Where to write transcripts (default: \$TRANSCRIBE_OUTDIR
+                             or $DEFAULT_OUTDIR)
+      --flat                 Write directly into the output dir instead of a
+                             per-source subfolder (<extractor>-<id>/)
   -m, --model MODEL          Whisper model/repo (default: \$TRANSCRIBE_MODEL
                              or $DEFAULT_MODEL)
   -f, --formats LIST         Comma-separated output formats, any of:
@@ -90,6 +96,7 @@ Options:
 
 Environment:
   TRANSCRIBE_MODEL           Default model when -m is not given
+  TRANSCRIBE_OUTDIR          Default output directory (default: $DEFAULT_OUTDIR)
   TRANSCRIBE_RETRIES         Download attempts per URL (default: 3)
   HF_HUB_DISABLE_XET         Set to 0 to re-enable Hugging Face's Xet transfer
                              backend (default here: 1, because Xet stalls)
@@ -154,7 +161,8 @@ model_revision() {
 }
 
 MODEL="${TRANSCRIBE_MODEL:-$DEFAULT_MODEL}"
-OUTDIR="."
+OUTDIR="${TRANSCRIBE_OUTDIR:-$DEFAULT_OUTDIR}"
+FLAT=0
 FORMATS="txt,srt"
 EMIT=""
 WINDOW="$DEFAULT_WINDOW"
@@ -173,6 +181,7 @@ RETRIES="${TRANSCRIBE_RETRIES:-3}"
 while [ $# -gt 0 ]; do
     case "$1" in
         -o|--output-dir)        need_value "$@"; OUTDIR="$2"; shift 2 ;;
+        --flat)                 FLAT=1; shift ;;
         -m|--model)             need_value "$@"; MODEL="$2"; shift 2 ;;
         -f|--formats)           need_value "$@"; FORMATS="$2"; shift 2 ;;
         --emit)                 need_value "$@"; EMIT="$2"; shift 2 ;;
@@ -255,8 +264,13 @@ fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
     printf 'dry run - nothing will be downloaded or written\n'
-    printf '  model:   %s\n  formats: %s\n  outdir:  %s\n' "$MODEL" \
-        "$(printf '%s ' "${SEEN_FORMATS}" | sed -e 's/^ *//' -e 's/ *$//' -e 's/ /,/g')" "$OUTDIR"
+    printf '  model:   %s\n  formats: %s\n' "$MODEL" \
+        "$(printf '%s ' "${SEEN_FORMATS}" | sed -e 's/^ *//' -e 's/ *$//' -e 's/ /,/g')"
+    if [ "$FLAT" -eq 1 ]; then
+        printf '  outdir:  %s (flat)\n' "$OUTDIR"
+    else
+        printf '  outdir:  %s/<extractor>-<id>/\n' "$OUTDIR"
+    fi
     [ -z "$LANGUAGE" ] || printf '  language: %s\n' "$LANGUAGE"
     [ "$CHUNK_MIN" -eq 0 ] || printf '  chunking: %s min\n' "$CHUNK_MIN"
     for src in "$@"; do
@@ -327,11 +341,15 @@ for src in "$@"; do
         audio_files=("$src")
     else
         # Reset per-URL intermediates so find() below only sees this URL's audio.
-        find "$WORK" -maxdepth 1 -type f -name '*.wav' -delete
+        find "$WORK" -mindepth 2 -maxdepth 2 -type f -name '*.wav' -delete
 
         printf -- '--> fetching audio (audio stream only)\n'
 
-        args=("${dl_args[@]}" -o "$WORK/%(title).60s [%(id)s].%(ext)s")
+        # One subdirectory per media item named <extractor>-<id>. That name becomes
+        # the transcript folder, so it is derived from the download path instead of
+        # a second yt-dlp call or JSON parsing (txt/srt runs need no info JSON).
+        args=("${dl_args[@]}"
+              -o "$WORK/%(extractor_key)s-%(id)s/%(title).60s [%(id)s].%(ext)s")
         if [ -n "$COOKIES_BROWSER" ]; then
             args+=(--cookies-from-browser "$COOKIES_BROWSER")
         fi
@@ -360,7 +378,7 @@ for src in "$@"; do
 
         while IFS= read -r f; do
             audio_files+=("$f")
-        done < <(find "$WORK" -maxdepth 1 -type f -name '*.wav' | sort)
+        done < <(find "$WORK" -mindepth 2 -maxdepth 2 -type f -name '*.wav' | sort)
 
         if [ ${#audio_files[@]} -eq 0 ]; then
             printf 'error: no audio extracted from %s\n' "$src" >&2
@@ -378,13 +396,31 @@ for src in "$@"; do
         # them so the transcript filename stays shell-friendly.
         out_base="$(printf '%s' "$base" | sed -e 's/[[:space:]][[:space:]]*/ /g' -e 's/ $//')"
 
+        # Per-source output folder: <extractor>-<id> from the download path, or
+        # local-<name> for files passed in directly. --flat writes straight into
+        # the output dir instead.
+        if [ "$FLAT" -eq 1 ]; then
+            dest_dir="$OUTDIR"
+        else
+            case "$audio" in
+                "$WORK"/*) src_folder="$(basename "$(dirname "$audio")")" ;;
+                *)         src_folder="local-$out_base" ;;
+            esac
+            src_folder="$(printf '%s' "$src_folder" \
+                | tr '[:upper:]' '[:lower:]' \
+                | sed -e 's/[^a-z0-9._-][^a-z0-9._-]*/-/g' -e 's/^-*//' -e 's/[-.]*$//')"
+            [ -n "$src_folder" ] || src_folder="unknown"
+            dest_dir="$OUTDIR/$src_folder"
+        fi
+
         if [ "$FORCE" -eq 0 ]; then
             all_present=1
             for f in $SEEN_FORMATS; do
-                [ -f "$OUTDIR/$out_base.$f" ] || { all_present=0; break; }
+                [ -f "$dest_dir/$out_base.$f" ] || { all_present=0; break; }
             done
             if [ "$all_present" -eq 1 ]; then
-                printf -- '--> skipping %s: outputs already exist (use --force to redo)\n' "$out_base"
+                printf -- '--> skipping %s: outputs already exist in %s (use --force to redo)\n' \
+                    "$out_base" "$dest_dir"
                 skipped=$((skipped + 1))
                 continue
             fi
@@ -500,10 +536,14 @@ for src in "$@"; do
             rm -rf "$chunk_dir"
         fi
 
+        # Only create the folder once there is something to write, so a failed
+        # transcription leaves no empty directory behind.
+        mkdir -p "$dest_dir"
+
         for f in ${REQUESTED_MLX[@]+"${REQUESTED_MLX[@]}"}; do
             if [ -f "$WORK/$out_base.$f" ]; then
-                cp "$WORK/$out_base.$f" "$OUTDIR/"
-                printf -- '    wrote %s\n' "$OUTDIR/$out_base.$f"
+                cp "$WORK/$out_base.$f" "$dest_dir/"
+                printf -- '    wrote %s\n' "$dest_dir/$out_base.$f"
             else
                 printf 'error: expected %s was not produced\n' "$WORK/$out_base.$f" >&2
                 item_failed=1
@@ -527,7 +567,7 @@ for src in "$@"; do
             source_for_render="$src"
             if ! "$PYTHON" "$RENDER" --segments "$WORK/$out_base.json" \
                     --info "$info_json" --window "$WINDOW" \
-                    --outdir "$OUTDIR" --base "$out_base" --formats "$extra_list" \
+                    --outdir "$dest_dir" --base "$out_base" --formats "$extra_list" \
                     --model "$MODEL" --model-revision "$(model_revision "$MODEL")" --tool-version "$VERSION" --audio-sha256 "$(sha256_of "$audio")" \
                     --transcribed-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                     --source "$source_for_render" \
@@ -562,6 +602,9 @@ for src in "$@"; do
 done
 
 printf '\ntranscribed %d item(s) into %s' "$processed" "$OUTDIR"
+if [ "$FLAT" -eq 0 ] && [ "$processed" -gt 0 ]; then
+    printf ' (one folder per source)'
+fi
 if [ "$skipped" -gt 0 ]; then
     printf ' (%d skipped, already done)' "$skipped"
 fi
