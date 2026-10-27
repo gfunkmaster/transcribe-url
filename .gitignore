@@ -1,0 +1,24 @@
+# local media and transcripts
+*.wav
+*.mp4
+*.m4a
+*.mp3
+*.webm
+*.aiff
+*.txt
+*.srt
+*.vtt
+*.tsv
+*.json
+!package.json
+
+# keep the test fixture
+!test/fixtures/*.wav
+
+# macOS
+.DS_Store
+
+# editor / tooling
+.idea/
+.vscode/
+*.log
