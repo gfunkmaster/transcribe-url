@@ -23,6 +23,9 @@ import sys
 # Extractors whose URLs accept a timestamp parameter, lowercased prefixes.
 DEEP_LINK_PREFIXES = ("youtube",)
 
+# Bump when md frontmatter or jsonl record keys change incompatibly.
+SCHEMA_VERSION = 1
+
 
 def mmss(seconds):
     total = int(seconds)
@@ -47,6 +50,28 @@ def load_json(path):
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+# Whisper hallucinates on silence/music by repeating one phrase. Keep a phrase
+# at most this many times in a row; the rest is a decoding loop, not speech.
+MAX_CONSECUTIVE_REPEATS = 2
+
+
+def drop_repeat_loops(segments):
+    """Drop segments past MAX_CONSECUTIVE_REPEATS identical texts in a row."""
+    kept = []
+    previous = None
+    run = 0
+    dropped = 0
+    for segment in segments:
+        key = (segment.get("text") or "").strip().lower()
+        run = run + 1 if key and key == previous else 1
+        previous = key
+        if key and run > MAX_CONSECUTIVE_REPEATS:
+            dropped += 1
+            continue
+        kept.append(segment)
+    return kept, dropped
 
 
 def merge_windows(segments, window):
@@ -113,13 +138,17 @@ def build_metadata(args, info, transcript):
         "duration_seconds": duration_seconds,
         "language": language,
         "model": args.model,
+        "model_revision": args.model_revision,
+        "tool_version": args.tool_version,
+        "schema_version": SCHEMA_VERSION,
         "audio_sha256": args.audio_sha256,
         "transcribed_at": args.transcribed_at,
     }
 
 
 FRONTMATTER_KEYS = ("source_url", "extractor", "id", "title", "uploader", "upload_date",
-                    "duration", "duration_seconds", "language", "model", "audio_sha256",
+                    "duration", "duration_seconds", "language", "model", "model_revision", "tool_version",
+                    "schema_version", "audio_sha256",
                     "transcribed_at")
 
 
@@ -164,6 +193,7 @@ def write_jsonl(path, meta, windows):
                 "text": window["text"],
                 "source_url": meta["source_url"],
                 "id": meta["id"],
+                "schema_version": SCHEMA_VERSION,
             }
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -177,6 +207,8 @@ def main():
     parser.add_argument("--base", required=True, help="output file basename")
     parser.add_argument("--formats", default="md", help="comma separated md,jsonl")
     parser.add_argument("--model", default="")
+    parser.add_argument("--model-revision", default="")
+    parser.add_argument("--tool-version", default="")
     parser.add_argument("--audio-sha256", default="")
     parser.add_argument("--transcribed-at", default="")
     parser.add_argument("--source", default="", help="fallback source URL or path")
@@ -198,6 +230,10 @@ def main():
               file=sys.stderr)
 
     info = load_json(args.info)
+    segments, dropped = drop_repeat_loops(segments)
+    if dropped:
+        print("note: dropped {} repeated segment(s) (likely a Whisper loop)".format(dropped),
+              file=sys.stderr)
     windows = merge_windows(segments, args.window)
     meta = build_metadata(args, info, transcript)
     os.makedirs(args.outdir, exist_ok=True)

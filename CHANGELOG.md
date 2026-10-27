@@ -4,6 +4,30 @@ All notable changes to this project. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-10-27
+
+### Added
+
+- `--version`.
+- `tool_version` and `schema_version` in md frontmatter; `schema_version` on every
+  jsonl row, so consumers can detect format changes.
+- `-a/--batch-file` (one URL/path per line, `#` comments), `--dry-run`, `--force`.
+- Skip-if-done: a URL/file whose requested outputs already exist is not
+  transcribed again (saves the expensive step; the download still happens for URLs).
+- `--chunk MINUTES`: fixed-length chunking for very long audio, merged by
+  `lib/merge_chunks.py` with shifted timestamps; language is detected once.
+- `--word-timestamps`; `model_revision` (cached HF commit) in the frontmatter.
+- Download retries with backoff (`TRANSCRIBE_RETRIES`, default 3).
+- Python unit tests (`test/test_render.py`), run by `test/smoke.sh`; nightly CI run.
+- Renderer drops Whisper repetition loops (same phrase more than twice in a row)
+  and says how many it dropped.
+
+### Fixed
+
+- `-f md` / `-f jsonl` without any mlx format crashed on bash 3.2 (`REQUESTED_MLX:
+  unbound variable`).
+- Ctrl-C / SIGTERM now always run the temp-dir cleanup.
+
 ## [0.2.0] - 2026-10-27
 
 Agent-friendly outputs. `txt`/`srt` remain human-facing; the new formats are meant
