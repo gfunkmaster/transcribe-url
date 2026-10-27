@@ -34,8 +34,10 @@ resolve_self_dir() {
 }
 
 PROG="$(basename "$0")"
+VERSION="0.2.0"
 SELF_DIR="$(resolve_self_dir "$0")"
 RENDER="$SELF_DIR/lib/render.py"
+MERGE_CHUNKS="$SELF_DIR/lib/merge_chunks.py"
 DEFAULT_MODEL="mlx-community/whisper-large-v3-turbo"
 DEFAULT_WINDOW=45
 # Written by mlx-whisper itself.
@@ -74,11 +76,21 @@ Options:
       --cookies-from-browser B
                              Read cookies from browser B (safari|chrome|firefox|...)
                              for login-gated or rate-limited posts
+      --word-timestamps      Ask Whisper for word-level timestamps (in the json output)
+      --chunk MINUTES        Transcribe audio longer than MINUTES in fixed-length
+                             chunks and merge them (bounds memory on multi-hour files).
+                             Cuts are not silence-aware: a word on a boundary may be lost.
+  -a, --batch-file FILE      Read URLs/paths from FILE, one per line ('-' = stdin);
+                             blank lines and lines starting with # are ignored
+      --force                Re-transcribe even if all requested outputs already exist
+      --dry-run              Print what would be done, then exit without downloading
   -k, --keep-audio           Keep the extracted audio files (prints their path)
   -h, --help                 Show this help
+      --version              Print the version and exit
 
 Environment:
   TRANSCRIBE_MODEL           Default model when -m is not given
+  TRANSCRIBE_RETRIES         Download attempts per URL (default: 3)
   HF_HUB_DISABLE_XET         Set to 0 to re-enable Hugging Face's Xet transfer
                              backend (default here: 1, because Xet stalls)
 
@@ -132,6 +144,15 @@ sha256_of() {
     fi
 }
 
+# model_revision <repo-id> - commit hash of the locally cached snapshot, or empty.
+# Recorded in md frontmatter so an upstream weight update is detectable.
+model_revision() {
+    local hub ref
+    hub="${HF_HUB_CACHE:-${HF_HOME:-$HOME/.cache/huggingface}/hub}"
+    ref="$hub/models--$(printf '%s' "$1" | sed 's#/#--#g')/refs/main"
+    [ -f "$ref" ] && tr -d '[:space:]' <"$ref" || true
+}
+
 MODEL="${TRANSCRIBE_MODEL:-$DEFAULT_MODEL}"
 OUTDIR="."
 FORMATS="txt,srt"
@@ -142,6 +163,12 @@ COOKIES_BROWSER=""
 FIRST_ONLY=0
 KEEP_AUDIO=0
 NO_CONDITION=0
+WORD_TIMESTAMPS=0
+CHUNK_MIN=0
+BATCH_FILE=""
+FORCE=0
+DRY_RUN=0
+RETRIES="${TRANSCRIBE_RETRIES:-3}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -154,8 +181,14 @@ while [ $# -gt 0 ]; do
         --cookies-from-browser) need_value "$@"; COOKIES_BROWSER="$2"; shift 2 ;;
         --first-only)           FIRST_ONLY=1; shift ;;
         --no-condition)         NO_CONDITION=1; shift ;;
+        --word-timestamps)      WORD_TIMESTAMPS=1; shift ;;
+        --chunk)                need_value "$@"; CHUNK_MIN="$2"; shift 2 ;;
+        -a|--batch-file)        need_value "$@"; BATCH_FILE="$2"; shift 2 ;;
+        --force)                FORCE=1; shift ;;
+        --dry-run)              DRY_RUN=1; shift ;;
         -k|--keep-audio)        KEEP_AUDIO=1; shift ;;
         -h|--help)              usage; exit 0 ;;
+        --version)              printf '%s %s\n' "$PROG" "$VERSION"; exit 0 ;;
         --)                     shift; break ;;
         -*)                     usage >&2
                                 printf 'error: unknown option: %s\n' "$1" >&2
@@ -163,6 +196,18 @@ while [ $# -gt 0 ]; do
         *)                      break ;;
     esac
 done
+
+# Batch file: append its entries after any positional URLs/paths.
+if [ -n "$BATCH_FILE" ]; then
+    if [ "$BATCH_FILE" != "-" ] && [ ! -f "$BATCH_FILE" ]; then
+        die "batch file not found: $BATCH_FILE"
+    fi
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="$(printf '%s' "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        case "$line" in ''|'#'*) continue ;; esac
+        set -- "$@" "$line"
+    done < <(if [ "$BATCH_FILE" = "-" ]; then cat; else cat "$BATCH_FILE"; fi)
+fi
 
 [ $# -gt 0 ] || { usage >&2; exit 2; }
 
@@ -172,6 +217,12 @@ case "$WINDOW" in
     ''|*[!0-9]*) die "--window needs a whole number of seconds (got '$WINDOW')" ;;
 esac
 [ "$WINDOW" -gt 0 ] || die "--window must be greater than 0"
+case "$CHUNK_MIN" in
+    ''|*[!0-9]*) die "--chunk needs a whole number of minutes (got '$CHUNK_MIN')" ;;
+esac
+case "$RETRIES" in
+    ''|*[!0-9]*|0) die "TRANSCRIBE_RETRIES must be a whole number >= 1 (got '$RETRIES')" ;;
+esac
 
 REQUESTED_MLX=()
 REQUESTED_EXTRA=()
@@ -202,6 +253,22 @@ if [ ${#REQUESTED_MLX[@]} -eq 0 ] && [ ${#REQUESTED_EXTRA[@]} -eq 0 ]; then
     die "no output formats requested"
 fi
 
+if [ "$DRY_RUN" -eq 1 ]; then
+    printf 'dry run - nothing will be downloaded or written\n'
+    printf '  model:   %s\n  formats: %s\n  outdir:  %s\n' "$MODEL" \
+        "$(printf '%s ' "${SEEN_FORMATS}" | sed -e 's/^ *//' -e 's/ *$//' -e 's/ /,/g')" "$OUTDIR"
+    [ -z "$LANGUAGE" ] || printf '  language: %s\n' "$LANGUAGE"
+    [ "$CHUNK_MIN" -eq 0 ] || printf '  chunking: %s min\n' "$CHUNK_MIN"
+    for src in "$@"; do
+        if [ -f "$src" ]; then
+            printf '  local file (no download): %s\n' "$src"
+        else
+            printf '  download audio + transcribe: %s\n' "$src"
+        fi
+    done
+    exit 0
+fi
+
 # --- preflight ------------------------------------------------------------
 YTDLP="$(command -v yt-dlp || true)"
 MLX="$(command -v mlx_whisper || true)"
@@ -209,10 +276,11 @@ PYTHON=""
 [ -n "$YTDLP" ] || die "yt-dlp not found (brew install yt-dlp)"
 [ -n "$MLX" ]   || die "mlx_whisper not found (uv tool install --python 3.13 mlx-whisper)"
 command -v ffmpeg >/dev/null 2>&1 || die "ffmpeg not found (brew install ffmpeg)"
-if [ ${#REQUESTED_EXTRA[@]} -gt 0 ]; then
+if [ ${#REQUESTED_EXTRA[@]} -gt 0 ] || [ "$CHUNK_MIN" -gt 0 ]; then
     PYTHON="$(command -v python3 || true)"
-    [ -n "$PYTHON" ] || die "python3 is required for md/jsonl output (brew install python)"
+    [ -n "$PYTHON" ] || die "python3 is required for md/jsonl output and --chunk (brew install python)"
     [ -f "$RENDER" ] || die "renderer missing: $RENDER (is the repo complete?)"
+    [ -f "$MERGE_CHUNKS" ] || die "chunk merger missing: $MERGE_CHUNKS (is the repo complete?)"
 fi
 
 mkdir -p "$OUTDIR"
@@ -229,6 +297,9 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
+# Make Ctrl-C / kill run the EXIT trap so the temp dir never leaks.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # 16 kHz mono WAV is exactly what Whisper expects; ffmpeg does the conversion.
 # -f bestaudio/best downloads only the audio stream: for a 68-minute video that
@@ -245,6 +316,7 @@ fi
 
 exit_status=0
 processed=0
+skipped=0
 
 for src in "$@"; do
     printf '\n==> %s\n' "$src"
@@ -267,8 +339,21 @@ for src in "$@"; do
             args+=(--playlist-items 1)
         fi
 
-        if ! "$YTDLP" "${args[@]}" "$src"; then
-            printf 'error: download failed for %s\n' "$src" >&2
+        attempt=1
+        downloaded=0
+        while :; do
+            if "$YTDLP" "${args[@]}" "$src"; then
+                downloaded=1
+                break
+            fi
+            [ "$attempt" -lt "$RETRIES" ] || break
+            printf 'warning: download attempt %d/%d failed, retrying in %ds\n' \
+                "$attempt" "$RETRIES" "$((attempt * 3))" >&2
+            sleep "$((attempt * 3))"
+            attempt=$((attempt + 1))
+        done
+        if [ "$downloaded" -eq 0 ]; then
+            printf 'error: download failed for %s (after %d attempt(s))\n' "$src" "$attempt" >&2
             exit_status=1
             continue
         fi
@@ -293,6 +378,18 @@ for src in "$@"; do
         # them so the transcript filename stays shell-friendly.
         out_base="$(printf '%s' "$base" | sed -e 's/[[:space:]][[:space:]]*/ /g' -e 's/ $//')"
 
+        if [ "$FORCE" -eq 0 ]; then
+            all_present=1
+            for f in $SEEN_FORMATS; do
+                [ -f "$OUTDIR/$out_base.$f" ] || { all_present=0; break; }
+            done
+            if [ "$all_present" -eq 1 ]; then
+                printf -- '--> skipping %s: outputs already exist (use --force to redo)\n' "$out_base"
+                skipped=$((skipped + 1))
+                continue
+            fi
+        fi
+
         # Local ffprobe call: tells the user how long the audio is, which predicts
         # how long transcription will take (~10-20x realtime on this machine).
         dur=0
@@ -304,36 +401,106 @@ for src in "$@"; do
             printf -- '    audio length: %d:%02d\n' "$((dur / 60))" "$((dur % 60))"
         fi
 
-        # One transcription pass, all formats written, then copy what was asked
-        # for - avoids re-running the model once per format.
-        wh_args=("$audio" --model "$MODEL" --output-dir "$WORK"
-                 --output-name "$out_base" --output-format all --verbose False)
+        # Options shared by the single pass and by every chunk.
+        common_args=(--model "$MODEL")
         if [ -n "$LANGUAGE" ]; then
-            wh_args+=(--language "$LANGUAGE")
+            common_args+=(--language "$LANGUAGE")
+        fi
+        if [ "$WORD_TIMESTAMPS" -eq 1 ]; then
+            common_args+=(--word-timestamps True)
+        fi
+        chunked=0
+        if [ "$CHUNK_MIN" -gt 0 ] && [ "$dur" -gt "$((CHUNK_MIN * 60))" ]; then
+            chunked=1
         fi
         # Long recordings: conditioning each window on the previous output makes
         # Whisper degenerate over time (segments shrink to one word with ~0.1 s
         # timestamps; measured 445 of 729 segments affected in the 60-70 min
         # range of a 68 min lecture). Turning it off keeps that from compounding.
-        if [ "$NO_CONDITION" -eq 1 ] || [ "$dur" -ge 1800 ]; then
-            wh_args+=(--condition-on-previous-text False)
+        # Chunks restart the context anyway, so only --no-condition applies there.
+        if [ "$NO_CONDITION" -eq 1 ] || { [ "$chunked" -eq 0 ] && [ "$dur" -ge 1800 ]; }; then
+            common_args+=(--condition-on-previous-text False)
         fi
         if [ "$NO_CONDITION" -eq 1 ]; then
             printf -- '    condition_on_previous_text disabled (--no-condition)\n'
-        elif [ "$dur" -ge 1800 ]; then
+        elif [ "$chunked" -eq 0 ] && [ "$dur" -ge 1800 ]; then
             printf -- '    long audio: disabling condition_on_previous_text (prevents degeneration)\n'
         fi
 
         printf -- '--> transcribing %s (model: %s)\n' "$out_base" "$MODEL"
         item_failed=0
-        if ! "$MLX" "${wh_args[@]}"; then
-            printf 'error: transcription failed for %s\n' "$out_base" >&2
-            printf '       (unknown model id? mlx-community models use -mlx/-fp16 suffixes)\n' >&2
-            exit_status=1
-            continue
+        if [ "$chunked" -eq 0 ]; then
+            # One transcription pass, all formats written, then copy what was asked
+            # for - avoids re-running the model once per format.
+            if ! "$MLX" "$audio" "${common_args[@]}" --output-dir "$WORK" \
+                    --output-name "$out_base" --output-format all --verbose False; then
+                printf 'error: transcription failed for %s\n' "$out_base" >&2
+                printf '       (unknown model id? mlx-community models use -mlx/-fp16 suffixes)\n' >&2
+                exit_status=1
+                continue
+            fi
+        else
+            chunk_secs=$((CHUNK_MIN * 60))
+            chunk_dir="$WORK/chunks"
+            rm -rf "$chunk_dir"
+            mkdir -p "$chunk_dir/in" "$chunk_dir/out"
+            printf -- '    long audio: transcribing in %d-minute chunks\n' "$CHUNK_MIN"
+            if ! ffmpeg -v error -i "$audio" -f segment -segment_time "$chunk_secs" \
+                    -ar 16000 -ac 1 -c:a pcm_s16le "$chunk_dir/in/%05d.wav"; then
+                printf 'error: could not split %s into chunks\n' "$out_base" >&2
+                exit_status=1
+                continue
+            fi
+            chunk_json=()
+            chunk_failed=0
+            chunk_lang="$LANGUAGE"
+            n_chunks=$(find "$chunk_dir/in" -type f -name '*.wav' | wc -l | tr -d ' ')
+            i=0
+            for chunk in "$chunk_dir"/in/*.wav; do
+                i=$((i + 1))
+                cname="$(basename "$chunk" .wav)"
+                printf -- '    chunk %d/%d\n' "$i" "$n_chunks"
+                chunk_args=("${common_args[@]}")
+                # Detect the language once, on the first chunk, and reuse it so a
+                # music-heavy later chunk cannot flip the language mid-file.
+                if [ -z "$chunk_lang" ]; then
+                    :
+                else
+                    case " ${chunk_args[*]} " in
+                        *" --language "*) ;;
+                        *) chunk_args+=(--language "$chunk_lang") ;;
+                    esac
+                fi
+                if ! "$MLX" "$chunk" "${chunk_args[@]}" --output-dir "$chunk_dir/out" \
+                        --output-name "$cname" --output-format json --verbose False; then
+                    chunk_failed=1
+                    break
+                fi
+                chunk_json+=("$chunk_dir/out/$cname.json")
+                if [ -z "$chunk_lang" ]; then
+                    chunk_lang="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("language") or "")' "$chunk_dir/out/$cname.json" 2>/dev/null || true)"
+                fi
+            done
+            if [ "$chunk_failed" -ne 0 ]; then
+                printf 'error: transcription failed for %s (chunk %d)\n' "$out_base" "$i" >&2
+                printf '       (unknown model id? mlx-community models use -mlx/-fp16 suffixes)\n' >&2
+                exit_status=1
+                continue
+            fi
+            merge_formats="json"
+            for f in ${REQUESTED_MLX[@]+"${REQUESTED_MLX[@]}"}; do
+                [ "$f" = "json" ] || merge_formats="$merge_formats,$f"
+            done
+            if ! "$PYTHON" "$MERGE_CHUNKS" --chunk-seconds "$chunk_secs" \
+                    --out-base "$WORK/$out_base" --formats "$merge_formats" "${chunk_json[@]}"; then
+                printf 'error: could not merge chunks for %s\n' "$out_base" >&2
+                exit_status=1
+                continue
+            fi
+            rm -rf "$chunk_dir"
         fi
 
-        for f in "${REQUESTED_MLX[@]}"; do
+        for f in ${REQUESTED_MLX[@]+"${REQUESTED_MLX[@]}"}; do
             if [ -f "$WORK/$out_base.$f" ]; then
                 cp "$WORK/$out_base.$f" "$OUTDIR/"
                 printf -- '    wrote %s\n' "$OUTDIR/$out_base.$f"
@@ -361,7 +528,7 @@ for src in "$@"; do
             if ! "$PYTHON" "$RENDER" --segments "$WORK/$out_base.json" \
                     --info "$info_json" --window "$WINDOW" \
                     --outdir "$OUTDIR" --base "$out_base" --formats "$extra_list" \
-                    --model "$MODEL" --audio-sha256 "$(sha256_of "$audio")" \
+                    --model "$MODEL" --model-revision "$(model_revision "$MODEL")" --tool-version "$VERSION" --audio-sha256 "$(sha256_of "$audio")" \
                     --transcribed-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                     --source "$source_for_render" \
                     >"$WORK/render.out" 2>"$WORK/render.err"; then
@@ -394,7 +561,11 @@ for src in "$@"; do
     done
 done
 
-printf '\ntranscribed %d item(s) into %s\n' "$processed" "$OUTDIR"
+printf '\ntranscribed %d item(s) into %s' "$processed" "$OUTDIR"
+if [ "$skipped" -gt 0 ]; then
+    printf ' (%d skipped, already done)' "$skipped"
+fi
+printf '\n'
 if [ "$exit_status" -ne 0 ]; then
     printf 'some items failed (see errors above)\n' >&2
 fi

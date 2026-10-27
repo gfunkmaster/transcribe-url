@@ -85,8 +85,15 @@ transcribe-url ./interview.mp4                       # local file, no download
       --first-only           Only the first media item of a multi-video post
       --no-condition         Disable condition_on_previous_text (auto for audio ≥ 30 min)
       --cookies-from-browser B   Read cookies from browser B (safari|chrome|firefox|...)
+      --word-timestamps      Word-level timestamps (in the json output)
+      --chunk MINUTES        Transcribe audio longer than MINUTES in chunks and merge
+                             (bounds memory; cuts are not silence-aware)
+  -a, --batch-file FILE      URLs/paths from FILE, one per line ('-' = stdin; # comments ok)
+      --force                Re-transcribe even if all requested outputs exist
+      --dry-run              Show the plan, download nothing
   -k, --keep-audio           Keep extracted audio (prints the path)
   -h, --help                 Show help
+      --version              Print the version
 ```
 
 Environment:
@@ -94,6 +101,7 @@ Environment:
 | Variable | Purpose |
 |---|---|
 | `TRANSCRIBE_MODEL` | Default model when `-m` is not given |
+| `TRANSCRIBE_RETRIES` | Download attempts per URL, with 3 s / 6 s backoff (default 3) |
 | `HF_HUB_DISABLE_XET` | Set to `0` to re-enable Hugging Face's Xet transfer backend |
 
 ### Transcribe from X/Twitter at all?
@@ -178,6 +186,7 @@ keeps the plain `[mm:ss]` anchor plus `source_url`.
 | Model download hangs at 0 B/s | Hugging Face's Xet backend stalling → `HF_HUB_DISABLE_XET=1` (this is also the project default) |
 | `Invalid username or password` / 401 from Hugging Face | The model id does not exist. `mlx-community` ids use `-mlx`/`-fp16` suffixes: `whisper-small-mlx`, not `whisper-small` |
 | `mlx_whisper not found` | `uv tool install --python 3.13 mlx-whisper`, then ensure `~/.local/bin` is on your `PATH` |
+| `skipping …: outputs already exist` | A previous run already wrote every requested format under that name. `--force` redoes it |
 | Output looks frozen | Downloads print a live progress bar; check that your terminal is not buffering. Ctrl-C is always safe — temp files are cleaned up |
 
 ## Privacy and safety
@@ -193,17 +202,18 @@ keeps the plain `[mm:ss]` anchor plus `source_url`.
 
 - [x] Agent-friendly `md` / `jsonl` outputs with provenance and window merging
 - [x] GitHub Actions: shellcheck, offline suite, end-to-end on a macOS arm64 runner
-- [ ] `--version`, `--dry-run`, `--quiet`, `--force`, `-a urls.txt` (batch file input)
+- [x] `--version`, `--dry-run`, `--force`, `-a urls.txt`, skip-if-done, download retries
+- [x] Opt-in `--chunk MINUTES` for very long audio
+- [ ] `--quiet`; silence-aware chunk boundaries
 - [ ] Optional `faster-whisper` / `whisper.cpp` backend for Linux and Intel Macs
-- [ ] Chunked processing for very long audio
 - [ ] Homebrew tap: `brew install gfunkmaster/tap/transcribe-url`
 
 ## Development
 
 ```bash
 ./test/smoke.sh                 # offline: CLI contract, dependency detection, cleanup,
-                                # renderer merging/metadata/deep links (28 checks)
-SMOKE_NETWORK=1 ./test/smoke.sh # + real pipeline with whisper-tiny (36 checks)
+                                # renderer merging/metadata/deep links (41 checks incl. Python unit tests)
+SMOKE_NETWORK=1 ./test/smoke.sh # + real pipeline with whisper-tiny (53 checks)
 shellcheck -x transcribe-url.sh install.sh test/smoke.sh
 ./install.sh --check            # report missing dependencies, change nothing
 ```

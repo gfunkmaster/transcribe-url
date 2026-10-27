@@ -65,6 +65,7 @@ temp_dirs() {
 printf '\nCLI contract\n'
 case_ 0 "Usage:" "--help exits 0" "$SCRIPT" --help
 case_ 0 "-o, --output-dir" "--help documents options" "$SCRIPT" --help
+case_ 0 "transcribe-url.sh 0." "--version prints the version" "$SCRIPT" --version
 case_ 2 "" "no arguments exits 2" "$SCRIPT"
 case_ 2 "unknown option" "unknown option exits 2" "$SCRIPT" -z
 case_ 1 "unsupported format" "unsupported format exits 1" "$SCRIPT" -f txt,pdf https://example.com
@@ -113,6 +114,27 @@ case_ 1 "unsupported format" "bad --emit value is rejected" "$SCRIPT" --emit doc
 case_ 2 "needs a value" "--window without a value exits 2" "$SCRIPT" --window
 case_ 1 "whole number" "--window rejects non-numeric values" "$SCRIPT" --window abc https://example.com
 case_ 1 "greater than 0" "--window 0 is rejected" "$SCRIPT" --window 0 https://example.com
+
+# --- offline: batch, dry-run, chunk flags -----------------------------------
+printf '\nBatch / dry-run / chunk flags\n'
+printf '# comment\n\nhttps://example.com/a\n  https://example.com/b  \n' >"$TMP/urls.txt"
+case_ 0 "https://example.com/a" "--dry-run lists batch-file entries" "$SCRIPT" --dry-run -a "$TMP/urls.txt"
+if grep -q 'example.com/b' "$TMP/out" && ! grep -q 'comment' "$TMP/out"; then
+    ok "batch file trims lines and skips comments/blanks"
+else
+    no "batch file parsing wrong"
+fi
+case_ 0 "local file (no download)" "--dry-run recognises local files" "$SCRIPT" --dry-run "$ROOT/README.md"
+case_ 1 "batch file not found" "missing batch file is an error" "$SCRIPT" -a "$TMP/nope.txt"
+case_ 1 "whole number" "--chunk rejects non-numeric values" "$SCRIPT" --chunk abc https://example.com
+case_ 2 "needs a value" "--chunk without a value exits 2" "$SCRIPT" --chunk
+before="$(temp_dirs)"
+case_ 0 "" "--dry-run creates no temp dir" "$SCRIPT" --dry-run https://example.com
+if [ "$(temp_dirs)" = "$before" ]; then
+    ok "dry run leaves nothing behind"
+else
+    no "dry run leaked a temp dir"
+fi
 
 # --- offline: renderer unit tests (segment merging, metadata, deep links) ----
 printf '\nRenderer (md/jsonl)\n'
@@ -204,6 +226,46 @@ PY
         no "jsonl rows are malformed"
     fi
 
+    if grep -q '^tool_version: ' "$R/yt/v.md" && grep -q '^schema_version: 1' "$R/yt/v.md" &&
+        head -1 "$R/yt/v.jsonl" | grep -qF '"schema_version": 1'; then
+        ok "md and jsonl carry tool_version/schema_version"
+    else
+        no "schema_version/tool_version missing from md or jsonl"
+    fi
+
+    # A Whisper decoding loop (same phrase over and over) must not reach the output.
+    python3 - "$R/loop.json" <<'PY'
+import json, sys
+segs = [{"start": i * 3.0, "end": i * 3.0 + 3.0, "text": " Thank you."} for i in range(10)]
+segs.append({"start": 30.0, "end": 33.0, "text": " Real speech."})
+json.dump({"language": "en", "segments": segs}, open(sys.argv[1], "w"))
+PY
+    python3 "$ROOT/lib/render.py" --segments "$R/loop.json" --window 1 \
+        --outdir "$R/loop" --base l --formats jsonl >/dev/null 2>&1
+    n="$(wc -l <"$R/loop/l.jsonl" 2>/dev/null | tr -d ' ')"
+    if [ "$n" = "3" ] && grep -qF 'Real speech.' "$R/loop/l.jsonl"; then
+        ok "repeated-phrase loops are capped at 2, real speech kept"
+    else
+        no "loop filter wrong: expected 3 rows incl. real speech, got ${n:-0}"
+    fi
+
+    # Chunk merging: offsets are applied and every mlx-whisper format is written.
+    python3 - "$R/c1.json" "$R/c2.json" <<'PY'
+import json, sys
+json.dump({"language": "en", "segments": [{"id": 0, "start": 0.0, "end": 2.5, "text": " Hello."}]}, open(sys.argv[1], "w"))
+json.dump({"language": "en", "segments": [{"id": 0, "start": 1.0, "end": 3.0, "text": " World."}]}, open(sys.argv[2], "w"))
+PY
+    if python3 "$ROOT/lib/merge_chunks.py" --chunk-seconds 600 --out-base "$R/merged" \
+        --formats json,txt,srt,vtt,tsv "$R/c1.json" "$R/c2.json" &&
+        grep -qF '00:10:01,000 --> 00:10:03,000' "$R/merged.srt" &&
+        grep -qF '10:01.000 --> 10:03.000' "$R/merged.vtt" &&
+        grep -qF "$(printf '601000\t603000\tWorld.')" "$R/merged.tsv" &&
+        [ "$(wc -l <"$R/merged.txt" | tr -d ' ')" = "2" ]; then
+        ok "chunk merge shifts timestamps and writes txt/srt/vtt/tsv/json"
+    else
+        no "chunk merge output is wrong"
+    fi
+
     # Silent / non-speech audio produces no segments: that must not fail the run.
     printf '{"language": "en", "segments": []}' >"$R/empty.json"
     if python3 "$ROOT/lib/render.py" --segments "$R/empty.json" \
@@ -227,6 +289,18 @@ PY
     else
         ok "transcript without a segments key is rejected"
     fi
+fi
+
+# --- offline: python unit tests -----------------------------------------------
+printf '\nPython unit tests\n'
+if command -v python3 >/dev/null 2>&1; then
+    if python3 -m unittest discover -s "$ROOT/test" -p 'test_*.py' >"$TMP/out" 2>&1; then
+        ok "lib/*.py unit tests pass"
+    else
+        no "lib/*.py unit tests failed"
+    fi
+else
+    printf '  skip  python unit tests (python3 not on PATH)\n'
 fi
 
 # --- optional: real pipeline ------------------------------------------------
@@ -267,6 +341,31 @@ if [ "${SMOKE_NETWORK:-0}" = "1" ]; then
         else
             no "md frontmatter missing source_url"
         fi
+
+        # Skip-if-done: a second run must not transcribe again; --force must.
+        case_ 0 "outputs already exist" "second run skips finished work" \
+            "$SCRIPT" -m mlx-community/whisper-tiny -f txt,srt \
+            -o "$TMP/e2e/out" "$TMP/e2e/fixture.wav"
+        case_ 0 "transcribing" "--force re-transcribes" \
+            "$SCRIPT" --force -m mlx-community/whisper-tiny -f txt,srt \
+            -o "$TMP/e2e/out" "$TMP/e2e/fixture.wav"
+
+        # Chunked path: 3 s fixture, 1-minute chunk threshold is not exceeded, so
+        # build a 130 s file and force 1-minute chunks (3 chunks).
+        ffmpeg -loglevel error -f lavfi -i "sine=frequency=440:duration=130" \
+            -ar 16000 -ac 1 "$TMP/e2e/long.wav" -y || no "long fixture generation"
+        case_ 0 "chunk 3/3" "--chunk splits and transcribes every chunk" \
+            "$SCRIPT" --chunk 1 -m mlx-community/whisper-tiny -f txt,srt,json \
+            --emit md -o "$TMP/e2e/chunked" "$TMP/e2e/long.wav"
+        if [ -f "$TMP/e2e/chunked/long.srt" ] && [ -f "$TMP/e2e/chunked/long.json" ] \
+            && [ -f "$TMP/e2e/chunked/long.md" ]; then
+            ok "chunked run writes srt, json and md"
+        else
+            no "chunked run missing outputs"
+        fi
+        case_ 0 "" "-f md alone (no mlx formats) works" \
+            "$SCRIPT" -m mlx-community/whisper-tiny -f md \
+            -o "$TMP/e2e/mdonly" "$TMP/e2e/fixture.wav"
 
         case_ 1 "" "nonexistent model id fails with exit 1" \
             "$SCRIPT" -m mlx-community/whisper-small-does-not-exist -f txt \
