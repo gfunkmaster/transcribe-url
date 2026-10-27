@@ -95,7 +95,7 @@ printf '\nFailure handling\n'
 before="$(temp_dirs)"
 case_ 1 "" "nonexistent input exits 1" "$SCRIPT" "$TMP/does-not-exist.mp4"
 after="$(temp_dirs)"
-if [ "$after" -eq "$before" ]; then
+if [ "$after" -le "$before" ]; then
     ok "temp directory cleaned up after failure"
 else
     no "temp directory leaked ($before -> $after)"
@@ -114,6 +114,18 @@ case_ 1 "unsupported format" "bad --emit value is rejected" "$SCRIPT" --emit doc
 case_ 2 "needs a value" "--window without a value exits 2" "$SCRIPT" --window
 case_ 1 "whole number" "--window rejects non-numeric values" "$SCRIPT" --window abc https://example.com
 case_ 1 "greater than 0" "--window 0 is rejected" "$SCRIPT" --window 0 https://example.com
+case_ 0 "0.4.0" "--version prints the version" "$SCRIPT" --version
+
+# --- offline: output layout --------------------------------------------------
+printf '\nOutput layout\n'
+case_ 0 "<extractor>-<id>" "default outdir is ./transcripts with a per-source folder" \
+    "$SCRIPT" --dry-run https://example.com
+case_ 0 "(flat)" "--flat disables the per-source folder" \
+    "$SCRIPT" --dry-run --flat https://example.com
+case_ 0 "/tmp/smoke-outdir/<extractor>-<id>/" "TRANSCRIBE_OUTDIR overrides the default dir" \
+    env TRANSCRIBE_OUTDIR=/tmp/smoke-outdir "$SCRIPT" --dry-run https://example.com
+case_ 0 "/tmp/smoke-explicit/<extractor>-<id>/" "-o still wins over the default" \
+    "$SCRIPT" --dry-run -o /tmp/smoke-explicit https://example.com
 
 # --- offline: batch, dry-run, chunk flags -----------------------------------
 printf '\nBatch / dry-run / chunk flags\n'
@@ -317,10 +329,21 @@ if [ "${SMOKE_NETWORK:-0}" = "1" ]; then
             "$SCRIPT" -m mlx-community/whisper-tiny -f txt,srt \
             -o "$TMP/e2e/out" "$TMP/e2e/fixture.wav"
 
-        if [ -f "$TMP/e2e/out/fixture.txt" ] && [ -f "$TMP/e2e/out/fixture.srt" ]; then
-            ok "txt and srt produced for the local file"
+        # Default layout: one folder per source, named local-<base> for local files.
+        if [ -f "$TMP/e2e/out/local-fixture/fixture.txt" ] \
+            && [ -f "$TMP/e2e/out/local-fixture/fixture.srt" ]; then
+            ok "outputs land in a per-source folder (local-fixture/)"
         else
-            no "expected transcript files missing"
+            no "expected per-source folder out/local-fixture/"
+        fi
+
+        case_ 0 "" "--flat writes straight into the output dir" \
+            "$SCRIPT" --flat -m mlx-community/whisper-tiny -f txt \
+            -o "$TMP/e2e/flat" "$TMP/e2e/fixture.wav"
+        if [ -f "$TMP/e2e/flat/fixture.txt" ] && [ ! -d "$TMP/e2e/flat/local-fixture" ]; then
+            ok "--flat keeps the old flat layout"
+        else
+            no "--flat did not write directly into the output dir"
         fi
 
         case_ 0 "" "--no-condition is accepted" \
@@ -330,13 +353,14 @@ if [ "${SMOKE_NETWORK:-0}" = "1" ]; then
         case_ 0 "" "md + jsonl emitted alongside txt" \
             "$SCRIPT" -m mlx-community/whisper-tiny --emit md,jsonl --window 15 \
             -f txt -o "$TMP/e2e/out4" "$TMP/e2e/fixture.wav"
-        if [ -f "$TMP/e2e/out4/fixture.md" ] && [ -f "$TMP/e2e/out4/fixture.jsonl" ] \
-            && [ -f "$TMP/e2e/out4/fixture.txt" ]; then
+        if [ -f "$TMP/e2e/out4/local-fixture/fixture.md" ] \
+            && [ -f "$TMP/e2e/out4/local-fixture/fixture.jsonl" ] \
+            && [ -f "$TMP/e2e/out4/local-fixture/fixture.txt" ]; then
             ok "md, jsonl and txt written in one pass"
         else
             no "expected md, jsonl and txt outputs"
         fi
-        if grep -q '^source_url: ' "$TMP/e2e/out4/fixture.md" 2>/dev/null; then
+        if grep -q '^source_url: ' "$TMP/e2e/out4/local-fixture/fixture.md" 2>/dev/null; then
             ok "md frontmatter has source_url"
         else
             no "md frontmatter missing source_url"
@@ -357,8 +381,9 @@ if [ "${SMOKE_NETWORK:-0}" = "1" ]; then
         case_ 0 "chunk 3/3" "--chunk splits and transcribes every chunk" \
             "$SCRIPT" --chunk 1 -m mlx-community/whisper-tiny -f txt,srt,json \
             --emit md -o "$TMP/e2e/chunked" "$TMP/e2e/long.wav"
-        if [ -f "$TMP/e2e/chunked/long.srt" ] && [ -f "$TMP/e2e/chunked/long.json" ] \
-            && [ -f "$TMP/e2e/chunked/long.md" ]; then
+        if [ -f "$TMP/e2e/chunked/local-long/long.srt" ] \
+            && [ -f "$TMP/e2e/chunked/local-long/long.json" ] \
+            && [ -f "$TMP/e2e/chunked/local-long/long.md" ]; then
             ok "chunked run writes srt, json and md"
         else
             no "chunked run missing outputs"
@@ -370,7 +395,7 @@ if [ "${SMOKE_NETWORK:-0}" = "1" ]; then
         case_ 1 "" "nonexistent model id fails with exit 1" \
             "$SCRIPT" -m mlx-community/whisper-small-does-not-exist -f txt \
             -o "$TMP/e2e/out3" "$TMP/e2e/fixture.wav"
-        if [ -z "$(ls -A "$TMP/e2e/out3" 2>/dev/null)" ]; then
+        if [ -z "$(find "$TMP/e2e/out3" -type f 2>/dev/null | head -1)" ]; then
             ok "no files written for an invalid model"
         else
             no "files written despite an invalid model id"

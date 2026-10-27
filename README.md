@@ -65,7 +65,7 @@ directly; it only needs the three dependencies on your `PATH`.
 ## Usage
 
 ```bash
-transcribe-url <URL>                                # .txt + .srt in the current dir
+transcribe-url <URL>                                # → ./transcripts/<extractor>-<id>/
 transcribe-url -o ~/transcripts <URL>                # choose the output directory
 transcribe-url -l en <URL>                           # fix the spoken language
 transcribe-url -f txt,srt,json <URL>                 # pick output formats
@@ -75,8 +75,37 @@ transcribe-url -k <URL>                              # keep the extracted audio
 transcribe-url ./interview.mp4                       # local file, no download
 ```
 
+### Where files go
+
+Every run writes into **one folder per source**, inside the output directory
+(`./transcripts` by default):
+
 ```
-  -o, --output-dir DIR       Where to write transcripts (default: .)
+transcripts/
+├── twitter-1600649511827013632/
+│   ├── Jocelyn Laidlaw - How Kirstie Alley's… [1600649511827013632].txt
+│   ├── … .srt
+│   ├── … .md
+│   └── … .jsonl
+└── local-interview/
+    └── interview.txt
+```
+
+So a batch of URLs, a multi-video tweet, or a chunked 3-hour podcast never
+scatters files or mixes two sources in one directory. Folder names come from
+yt-dlp's `extractor_key` + media `id` (`youtube-…`, `twitter-…`, `twitter:spaces-…`),
+or `local-<filename>` for files you pass in directly.
+
+| Control | Effect |
+|---|---|
+| default | `./transcripts/<extractor>-<id>/` |
+| `-o DIR` | use `DIR/<extractor>-<id>/` |
+| `TRANSCRIBE_OUTDIR=DIR` | change the default for every run |
+| `--flat` | write straight into the output dir (the pre-0.4 layout) |
+
+```
+  -o, --output-dir DIR       Where to write transcripts (default: ./transcripts)
+      --flat                 Write into the output dir instead of a per-source folder
   -m, --model MODEL          Whisper model/repo (default: mlx-community/whisper-large-v3-turbo)
   -f, --formats LIST         Comma-separated: txt,vtt,srt,tsv,json,md,jsonl (default: txt,srt)
       --emit LIST            Shorthand to add agent-friendly outputs: md,jsonl
@@ -101,6 +130,7 @@ Environment:
 | Variable | Purpose |
 |---|---|
 | `TRANSCRIBE_MODEL` | Default model when `-m` is not given |
+| `TRANSCRIBE_OUTDIR` | Default output directory (default `./transcripts`) |
 | `TRANSCRIBE_RETRIES` | Download attempts per URL, with 3 s / 6 s backoff (default 3) |
 | `HF_HUB_DISABLE_XET` | Set to `0` to re-enable Hugging Face's Xet transfer backend |
 
@@ -212,8 +242,9 @@ keeps the plain `[mm:ss]` anchor plus `source_url`.
 
 ```bash
 ./test/smoke.sh                 # offline: CLI contract, dependency detection, cleanup,
-                                # renderer merging/metadata/deep links (41 checks incl. Python unit tests)
-SMOKE_NETWORK=1 ./test/smoke.sh # + real pipeline with whisper-tiny (53 checks)
+                                # renderer merging/metadata/deep links, output layout
+                                # (46 checks incl. Python unit tests)
+SMOKE_NETWORK=1 ./test/smoke.sh # + real pipeline with whisper-tiny (61 checks)
 shellcheck -x transcribe-url.sh install.sh test/smoke.sh
 ./install.sh --check            # report missing dependencies, change nothing
 ```
