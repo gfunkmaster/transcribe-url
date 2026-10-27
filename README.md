@@ -1,5 +1,7 @@
 # transcribe-url
 
+[![test](https://github.com/gfunkmaster/transcribe-url/actions/workflows/test.yml/badge.svg)](https://github.com/gfunkmaster/transcribe-url/actions/workflows/test.yml)
+
 Download the audio of a video/audio URL and transcribe it locally with Whisper on
 Apple Silicon. One command, no cloud, no API keys.
 

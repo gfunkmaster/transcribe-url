@@ -1,0 +1,47 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+      - name: Lint all scripts
+        run: shellcheck -x transcribe-url.sh install.sh test/smoke.sh
+
+  offline-tests:
+    name: offline tests (macOS arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke tests (no network)
+        run: ./test/smoke.sh
+
+  e2e:
+    name: end-to-end (macOS arm64)
+    # Dependency install takes minutes, so only on main pushes, tags and manual runs.
+    if: github.event_name != 'pull_request'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          brew install yt-dlp uv ffmpeg
+          uv tool install --python 3.13 mlx-whisper
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Verify installer check mode
+        run: ./install.sh --check
+      - name: Smoke tests incl. real transcription
+        run: SMOKE_NETWORK=1 ./test/smoke.sh
