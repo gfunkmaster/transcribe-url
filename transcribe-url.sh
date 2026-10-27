@@ -121,14 +121,8 @@ done
 
 [ $# -gt 0 ] || { usage >&2; exit 2; }
 
-# --- preflight ------------------------------------------------------------
-YTDLP="$(command -v yt-dlp || true)"
-MLX="$(command -v mlx_whisper || true)"
-[ -n "$YTDLP" ] || die "yt-dlp not found (brew install yt-dlp)"
-[ -n "$MLX" ]   || die "mlx_whisper not found (uv tool install --python 3.13 mlx-whisper)"
-command -v ffmpeg >/dev/null 2>&1 || die "ffmpeg not found (brew install ffmpeg)"
-
-# Validate requested formats against the formats mlx_whisper can write.
+# Validate the arguments before touching the environment: a typo in -f should be
+# reported as such, even on a machine that has no dependencies installed.
 REQUESTED=()
 SEEN_FORMATS=" "
 IFS=',' read -r -a _formats <<< "$FORMATS"
@@ -146,6 +140,13 @@ for f in "${_formats[@]}"; do
     esac
 done
 [ ${#REQUESTED[@]} -gt 0 ] || die "no output formats requested"
+
+# --- preflight ------------------------------------------------------------
+YTDLP="$(command -v yt-dlp || true)"
+MLX="$(command -v mlx_whisper || true)"
+[ -n "$YTDLP" ] || die "yt-dlp not found (brew install yt-dlp)"
+[ -n "$MLX" ]   || die "mlx_whisper not found (uv tool install --python 3.13 mlx-whisper)"
+command -v ffmpeg >/dev/null 2>&1 || die "ffmpeg not found (brew install ffmpeg)"
 
 mkdir -p "$OUTDIR"
 OUTDIR="$(cd "$OUTDIR" && pwd)"

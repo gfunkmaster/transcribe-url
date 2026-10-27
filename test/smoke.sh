@@ -75,13 +75,19 @@ printf '\nDependency detection\n'
 case_ 1 "yt-dlp not found" "missing yt-dlp is reported" \
     env PATH=/usr/bin:/bin "$SCRIPT" https://example.com
 
-# PATH with yt-dlp and ffmpeg but deliberately without mlx_whisper
-mkdir -p "$TMP/bin"
-for b in yt-dlp ffmpeg; do
-    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$TMP/bin/$b"
-done
-case_ 1 "mlx_whisper not found" "missing mlx_whisper is reported" \
-    env PATH="$TMP/bin:/usr/bin:/bin" "$SCRIPT" https://example.com
+# PATH with yt-dlp and ffmpeg but deliberately without mlx_whisper.
+# Only meaningful when those two are actually installed (they are not on a bare
+# CI runner), so skip rather than report a false failure.
+if command -v yt-dlp >/dev/null 2>&1 && command -v ffmpeg >/dev/null 2>&1; then
+    mkdir -p "$TMP/bin"
+    for b in yt-dlp ffmpeg; do
+        p="$(command -v "$b")" && ln -sf "$p" "$TMP/bin/$b"
+    done
+    case_ 1 "mlx_whisper not found" "missing mlx_whisper is reported" \
+        env PATH="$TMP/bin:/usr/bin:/bin" "$SCRIPT" https://example.com
+else
+    printf '  skip  missing mlx_whisper is reported (needs yt-dlp + ffmpeg installed)\n'
+fi
 
 # --- offline: failure handling and cleanup ----------------------------------
 printf '\nFailure handling\n'
