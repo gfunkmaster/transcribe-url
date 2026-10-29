@@ -4,7 +4,32 @@ All notable changes to this project. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.4.0] - 2026-10-27
+## [0.5.0] - 2026-10-29
+
+A browsable UI for the output folder, without building an app.
+
+### Added
+
+- `--index` — writes `index.html` into the output directory: one self-contained page
+  listing every source with title, extractor/uploader/date, duration, language,
+  model and per-format links. Search box in plain JS, no server, no external assets,
+  so it opens from Finder or can be dropped on a static host.
+  With **no URL** (`transcribe-url --index -o DIR`) it only rebuilds the page, which
+  is useful after moving or deleting transcripts.
+  Metadata comes from the `md` frontmatter of each folder; sources without it are
+  listed from the folder name and marked with `*`.
+- `--reveal` — opens the output directory in Finder when the run finishes (macOS,
+  best effort; a failure to open never fails the run).
+- `lib/index.py` with unit tests (`test/test_index.py`): frontmatter parsing,
+  folder/metadata fallback, newest-first ordering, HTML escaping of untrusted
+  titles, empty-folder message.
+
+### Changed
+
+- Smoke suite: 51 offline checks (was 46) and 69 with `SMOKE_NETWORK=1` (was 61);
+  the version test now cross-checks `--version` against the newest CHANGELOG entry,
+  so the two cannot drift.
+
 
 ### Changed
 

@@ -114,7 +114,14 @@ case_ 1 "unsupported format" "bad --emit value is rejected" "$SCRIPT" --emit doc
 case_ 2 "needs a value" "--window without a value exits 2" "$SCRIPT" --window
 case_ 1 "whole number" "--window rejects non-numeric values" "$SCRIPT" --window abc https://example.com
 case_ 1 "greater than 0" "--window 0 is rejected" "$SCRIPT" --window 0 https://example.com
-case_ 0 "0.4.0" "--version prints the version" "$SCRIPT" --version
+case_ 0 "0.5.0" "--version prints the version" "$SCRIPT" --version
+ver="$("$SCRIPT" --version | awk '{print $2}')"
+newest="$(grep -m1 -o '^## \[[0-9.]*\]' "$ROOT/CHANGELOG.md" | tr -d '#[] ')"
+if [ "$ver" = "$newest" ]; then
+    ok "VERSION matches the newest CHANGELOG entry ($ver)"
+else
+    no "VERSION is $ver but the newest CHANGELOG entry is $newest"
+fi
 
 # --- offline: output layout --------------------------------------------------
 printf '\nOutput layout\n'
@@ -148,7 +155,46 @@ else
     no "dry run leaked a temp dir"
 fi
 
-# --- offline: renderer unit tests (segment merging, metadata, deep links) ----
+# --- offline: index-only mode ------------------------------------------------
+printf '\nIndex (--index)\n'
+if ! command -v python3 >/dev/null 2>&1; then
+    printf '  skip  index tests (python3 not on PATH)\n'
+else
+    IDX="$TMP/index/sources"
+    mkdir -p "$IDX/twitter-42"
+    cat >"$IDX/twitter-42/note.md" <<'MD'
+---
+source_url: "https://x.com/someone/status/42"
+extractor: "Twitter"
+id: "42"
+title: "Indexed title"
+uploader: "Someone"
+upload_date: "2026-01-01"
+duration: "00:10"
+language: "en"
+model: "test-model"
+transcribed_at: "2026-01-02T03:04:05Z"
+---
+
+# Indexed title
+MD
+    printf 'hello\n' >"$IDX/twitter-42/note.txt"
+
+    case_ 0 "index.html" "--index with no URL rebuilds the index" \
+        "$SCRIPT" --index -o "$IDX"
+    if [ -f "$IDX/index.html" ] && grep -qF 'Indexed title' "$IDX/index.html"; then
+        ok "index.html lists the source title"
+    else
+        no "index.html missing or missing the title"
+    fi
+    if grep -qF 'href="twitter-42/note.md"' "$IDX/index.html"; then
+        ok "index links to the transcript files"
+    else
+        no "index has no links to the transcript files"
+    fi
+    case_ 0 "" "--index accepts a missing/empty folder" \
+        "$SCRIPT" --index -o "$TMP/index/empty"
+fi
 printf '\nRenderer (md/jsonl)\n'
 if ! command -v python3 >/dev/null 2>&1; then
     printf '  skip  renderer tests (python3 not on PATH)\n'
@@ -391,6 +437,30 @@ if [ "${SMOKE_NETWORK:-0}" = "1" ]; then
         case_ 0 "" "-f md alone (no mlx formats) works" \
             "$SCRIPT" -m mlx-community/whisper-tiny -f md \
             -o "$TMP/e2e/mdonly" "$TMP/e2e/fixture.wav"
+
+        # --index writes the browsable page; --reveal calls `open` (stubbed here so
+        # CI does not try to launch Finder).
+        mkdir -p "$TMP/e2e/bin"
+        cat >"$TMP/e2e/bin/open" <<EOF
+#!/bin/sh
+echo "\$@" >> "$TMP/e2e/open.log"
+EOF
+        chmod +x "$TMP/e2e/bin/open"
+        case_ 0 "" "--index and --reveal work together" \
+            env PATH="$TMP/e2e/bin:$PATH" "$SCRIPT" -m mlx-community/whisper-tiny \
+            -f txt --emit md --index --reveal -o "$TMP/e2e/idx" "$TMP/e2e/fixture.wav"
+        if [ -f "$TMP/e2e/idx/index.html" ] && grep -qF 'fixture' "$TMP/e2e/idx/index.html"; then
+            ok "--index wrote index.html for the run"
+        else
+            no "index.html missing after --index"
+        fi
+        # OUTDIR is resolved physically (macOS: /var -> /private/var), so compare
+        # on the tail of the path rather than the $TMP prefix.
+        if [ -s "$TMP/e2e/open.log" ] && grep -qF 'e2e/idx' "$TMP/e2e/open.log"; then
+            ok "--reveal opened the output folder"
+        else
+            no "--reveal did not call open with the output dir"
+        fi
 
         case_ 1 "" "nonexistent model id fails with exit 1" \
             "$SCRIPT" -m mlx-community/whisper-small-does-not-exist -f txt \
