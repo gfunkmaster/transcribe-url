@@ -34,10 +34,11 @@ resolve_self_dir() {
 }
 
 PROG="$(basename "$0")"
-VERSION="0.4.0"
+VERSION="0.5.0"
 SELF_DIR="$(resolve_self_dir "$0")"
 RENDER="$SELF_DIR/lib/render.py"
 MERGE_CHUNKS="$SELF_DIR/lib/merge_chunks.py"
+INDEXER="$SELF_DIR/lib/index.py"
 DEFAULT_MODEL="mlx-community/whisper-large-v3-turbo"
 DEFAULT_WINDOW=45
 # Outputs land in ./transcripts/<extractor>-<id>/ unless TRANSCRIBE_OUTDIR or -o
@@ -89,6 +90,9 @@ Options:
   -a, --batch-file FILE      Read URLs/paths from FILE, one per line ('-' = stdin);
                              blank lines and lines starting with # are ignored
       --force                Re-transcribe even if all requested outputs already exist
+      --index                Write/refresh index.html in the output dir (browsable
+                             list of every source); with no URL it only rebuilds it
+      --reveal               Open the output dir in Finder when the run finishes (macOS)
       --dry-run              Print what would be done, then exit without downloading
   -k, --keep-audio           Keep the extracted audio files (prints their path)
   -h, --help                 Show this help
@@ -176,6 +180,8 @@ CHUNK_MIN=0
 BATCH_FILE=""
 FORCE=0
 DRY_RUN=0
+INDEX=0
+REVEAL=0
 RETRIES="${TRANSCRIBE_RETRIES:-3}"
 
 while [ $# -gt 0 ]; do
@@ -194,6 +200,8 @@ while [ $# -gt 0 ]; do
         --chunk)                need_value "$@"; CHUNK_MIN="$2"; shift 2 ;;
         -a|--batch-file)        need_value "$@"; BATCH_FILE="$2"; shift 2 ;;
         --force)                FORCE=1; shift ;;
+        --index)                INDEX=1; shift ;;
+        --reveal)               REVEAL=1; shift ;;
         --dry-run)              DRY_RUN=1; shift ;;
         -k|--keep-audio)        KEEP_AUDIO=1; shift ;;
         -h|--help)              usage; exit 0 ;;
@@ -218,7 +226,7 @@ if [ -n "$BATCH_FILE" ]; then
     done < <(if [ "$BATCH_FILE" = "-" ]; then cat; else cat "$BATCH_FILE"; fi)
 fi
 
-[ $# -gt 0 ] || { usage >&2; exit 2; }
+[ $# -gt 0 ] || [ "$INDEX" -eq 1 ] || { usage >&2; exit 2; }
 
 # Validate the arguments before touching the environment: a typo in -f should be
 # reported as such, even on a machine that has no dependencies installed.
@@ -283,6 +291,18 @@ if [ "$DRY_RUN" -eq 1 ]; then
     exit 0
 fi
 
+# --- index-only mode --------------------------------------------------------
+# `--index` with no sources rebuilds index.html for the output folder and exits.
+if [ "$INDEX" -eq 1 ] && [ $# -eq 0 ]; then
+    PYTHON="$(command -v python3 || true)"
+    [ -n "$PYTHON" ] || die "python3 is required for --index (brew install python)"
+    [ -f "$INDEXER" ] || die "indexer missing: $INDEXER (is the repo complete?)"
+    mkdir -p "$OUTDIR"
+    OUTDIR="$(cd "$OUTDIR" && pwd)"
+    "$PYTHON" "$INDEXER" --outdir "$OUTDIR" --tool-version "$VERSION" || exit $?
+    exit 0
+fi
+
 # --- preflight ------------------------------------------------------------
 YTDLP="$(command -v yt-dlp || true)"
 MLX="$(command -v mlx_whisper || true)"
@@ -290,11 +310,12 @@ PYTHON=""
 [ -n "$YTDLP" ] || die "yt-dlp not found (brew install yt-dlp)"
 [ -n "$MLX" ]   || die "mlx_whisper not found (uv tool install --python 3.13 mlx-whisper)"
 command -v ffmpeg >/dev/null 2>&1 || die "ffmpeg not found (brew install ffmpeg)"
-if [ ${#REQUESTED_EXTRA[@]} -gt 0 ] || [ "$CHUNK_MIN" -gt 0 ]; then
+if [ ${#REQUESTED_EXTRA[@]} -gt 0 ] || [ "$CHUNK_MIN" -gt 0 ] || [ "$INDEX" -eq 1 ]; then
     PYTHON="$(command -v python3 || true)"
-    [ -n "$PYTHON" ] || die "python3 is required for md/jsonl output and --chunk (brew install python)"
+    [ -n "$PYTHON" ] || die "python3 is required for md/jsonl output, --chunk and --index (brew install python)"
     [ -f "$RENDER" ] || die "renderer missing: $RENDER (is the repo complete?)"
     [ -f "$MERGE_CHUNKS" ] || die "chunk merger missing: $MERGE_CHUNKS (is the repo complete?)"
+    [ -f "$INDEXER" ] || die "indexer missing: $INDEXER (is the repo complete?)"
 fi
 
 mkdir -p "$OUTDIR"
@@ -600,6 +621,25 @@ for src in "$@"; do
         fi
     done
 done
+
+# Optional: refresh the browsable index.html for the output folder.
+if [ "$INDEX" -eq 1 ] && [ "$processed" -gt 0 ]; then
+    if "$PYTHON" "$INDEXER" --outdir "$OUTDIR" --tool-version "$VERSION" \
+            >"$WORK/index.out" 2>"$WORK/index.err"; then
+        printf -- '--> wrote %s\n' "$(head -1 "$WORK/index.out")"
+        if [ -s "$WORK/index.err" ]; then
+            sed 's/^/    /' "$WORK/index.err"
+        fi
+    else
+        printf 'warning: could not write index.html\n' >&2
+        sed 's/^/       /' "$WORK/index.out" "$WORK/index.err" >&2
+    fi
+fi
+
+# Optional: reveal the output folder in Finder. macOS only, best effort.
+if [ "$REVEAL" -eq 1 ] && [ "$processed" -gt 0 ] && [ "$(uname -s)" = "Darwin" ]; then
+    open "$OUTDIR" >/dev/null 2>&1 || printf 'warning: could not open %s\n' "$OUTDIR" >&2
+fi
 
 printf '\ntranscribed %d item(s) into %s' "$processed" "$OUTDIR"
 if [ "$FLAT" -eq 0 ] && [ "$processed" -gt 0 ]; then

@@ -102,6 +102,28 @@ or `local-<filename>` for files you pass in directly.
 | `-o DIR` | use `DIR/<extractor>-<id>/` |
 | `TRANSCRIBE_OUTDIR=DIR` | change the default for every run |
 | `--flat` | write straight into the output dir (the pre-0.4 layout) |
+| `--index` | also write `index.html` — a browsable list of everything in the folder |
+| `--reveal` | open the output folder in Finder when the run finishes (macOS) |
+
+### Browsing what you have: `index.html`
+
+```bash
+transcribe-url --index --emit md <URL>      # transcribe, then (re)write index.html
+transcribe-url --index -o ./transcripts     # no URL: just rebuild the page
+```
+
+`index.html` is one self-contained file (no server, no CDN, no build step) in the
+output folder:
+
+- a row per source: title, extractor · uploader · uploaded date, length, language,
+  and clickable chips for every file (`.md` highlighted, `.txt`, `.srt`, `.jsonl`…)
+- instant client-side filter over title/uploader/language/model/id
+- metadata from each folder's `md` frontmatter; folders without one are still
+  listed from their name and marked `*`
+- escapes untrusted titles, so a video titled `<script>…` cannot inject markup
+
+Open it with `open transcripts/index.html`, or pair it with `--reveal` so Finder
+shows you the folder (and the page) right after a run.
 
 ```
   -o, --output-dir DIR       Where to write transcripts (default: ./transcripts)
@@ -119,6 +141,9 @@ or `local-<filename>` for files you pass in directly.
                              (bounds memory; cuts are not silence-aware)
   -a, --batch-file FILE      URLs/paths from FILE, one per line ('-' = stdin; # comments ok)
       --force                Re-transcribe even if all requested outputs exist
+      --index                Write/refresh index.html in the output dir (browsable list of
+                             every source); with no URL it only rebuilds the page
+      --reveal               Open the output dir in Finder when the run finishes (macOS)
       --dry-run              Show the plan, download nothing
   -k, --keep-audio           Keep extracted audio (prints the path)
   -h, --help                 Show help
@@ -233,6 +258,7 @@ keeps the plain `[mm:ss]` anchor plus `source_url`.
 - [x] Agent-friendly `md` / `jsonl` outputs with provenance and window merging
 - [x] GitHub Actions: shellcheck, offline suite, end-to-end on a macOS arm64 runner
 - [x] `--version`, `--dry-run`, `--force`, `-a urls.txt`, skip-if-done, download retries
+- [x] Browsable `index.html` for the output folder (`--index`) and `--reveal` for Finder
 - [x] Opt-in `--chunk MINUTES` for very long audio
 - [ ] `--quiet`; silence-aware chunk boundaries
 - [ ] Optional `faster-whisper` / `whisper.cpp` backend for Linux and Intel Macs
@@ -242,9 +268,9 @@ keeps the plain `[mm:ss]` anchor plus `source_url`.
 
 ```bash
 ./test/smoke.sh                 # offline: CLI contract, dependency detection, cleanup,
-                                # renderer merging/metadata/deep links, output layout
-                                # (46 checks incl. Python unit tests)
-SMOKE_NETWORK=1 ./test/smoke.sh # + real pipeline with whisper-tiny (61 checks)
+                                # renderer merging/metadata/deep links, output layout,
+                                # index generation (51 checks incl. Python unit tests)
+SMOKE_NETWORK=1 ./test/smoke.sh # + real pipeline with whisper-tiny (69 checks)
 shellcheck -x transcribe-url.sh install.sh test/smoke.sh
 ./install.sh --check            # report missing dependencies, change nothing
 ```
