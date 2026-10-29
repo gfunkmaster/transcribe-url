@@ -34,7 +34,7 @@ resolve_self_dir() {
 }
 
 PROG="$(basename "$0")"
-VERSION="0.6.0"
+VERSION="0.6.1"
 SELF_DIR="$(resolve_self_dir "$0")"
 RENDER="$SELF_DIR/lib/render.py"
 MERGE_CHUNKS="$SELF_DIR/lib/merge_chunks.py"
@@ -442,6 +442,7 @@ for src in "$@"; do
         done
         if [ "$downloaded" -eq 0 ]; then
             printf 'error: download failed for %s (after %d attempt(s))\n' "$src" "$attempt" >&2
+            ev error stage=s:download input=s:"$src" message=s:"download failed after $attempt attempt(s)"
             exit_status=1
             continue
         fi
@@ -452,6 +453,7 @@ for src in "$@"; do
 
         if [ ${#audio_files[@]} -eq 0 ]; then
             printf 'error: no audio extracted from %s\n' "$src" >&2
+            ev error stage=s:download input=s:"$src" message=s:"no audio extracted"
             exit_status=1
             continue
         fi
@@ -544,6 +546,7 @@ for src in "$@"; do
             if ! "$MLX" "$audio" "${common_args[@]}" --output-dir "$WORK" \
                     --output-name "$out_base" --output-format all --verbose False; then
                 printf 'error: transcription failed for %s\n' "$out_base" >&2
+                ev error stage=s:transcribe item=s:"$out_base" message=s:"transcription failed"
                 printf '       (unknown model id? mlx-community models use -mlx/-fp16 suffixes)\n' >&2
                 exit_status=1
                 continue
@@ -557,6 +560,7 @@ for src in "$@"; do
             if ! ffmpeg -v error -i "$audio" -f segment -segment_time "$chunk_secs" \
                     -ar 16000 -ac 1 -c:a pcm_s16le "$chunk_dir/in/%05d.wav"; then
                 printf 'error: could not split %s into chunks\n' "$out_base" >&2
+                ev error stage=s:chunk item=s:"$out_base" message=s:"could not split into chunks"
                 exit_status=1
                 continue
             fi
@@ -592,6 +596,7 @@ for src in "$@"; do
             done
             if [ "$chunk_failed" -ne 0 ]; then
                 printf 'error: transcription failed for %s (chunk %d)\n' "$out_base" "$i" >&2
+                ev error stage=s:transcribe item=s:"$out_base" chunk=n:"$i" message=s:"transcription failed"
                 printf '       (unknown model id? mlx-community models use -mlx/-fp16 suffixes)\n' >&2
                 exit_status=1
                 continue
@@ -647,6 +652,7 @@ for src in "$@"; do
                     --source "$source_for_render" \
                     >"$WORK/render.out" 2>"$WORK/render.err"; then
                 printf 'error: could not render %s for %s\n' "$extra_list" "$out_base" >&2
+                ev error stage=s:render item=s:"$out_base" message=s:"could not render $extra_list"
                 sed 's/^/       /' "$WORK/render.out" "$WORK/render.err" >&2
                 item_failed=1
             else

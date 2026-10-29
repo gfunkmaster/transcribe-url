@@ -65,7 +65,6 @@ temp_dirs() {
 printf '\nCLI contract\n'
 case_ 0 "Usage:" "--help exits 0" "$SCRIPT" --help
 case_ 0 "-o, --output-dir" "--help documents options" "$SCRIPT" --help
-case_ 0 "transcribe-url.sh 0." "--version prints the version" "$SCRIPT" --version
 case_ 2 "" "no arguments exits 2" "$SCRIPT"
 case_ 2 "unknown option" "unknown option exits 2" "$SCRIPT" -z
 case_ 1 "unsupported format" "unsupported format exits 1" "$SCRIPT" -f txt,pdf https://example.com
@@ -114,7 +113,7 @@ case_ 1 "unsupported format" "bad --emit value is rejected" "$SCRIPT" --emit doc
 case_ 2 "needs a value" "--window without a value exits 2" "$SCRIPT" --window
 case_ 1 "whole number" "--window rejects non-numeric values" "$SCRIPT" --window abc https://example.com
 case_ 1 "greater than 0" "--window 0 is rejected" "$SCRIPT" --window 0 https://example.com
-case_ 0 "0.6.0" "--version prints the version" "$SCRIPT" --version
+case_ 0 "0.6.1" "--version prints the version" "$SCRIPT" --version
 ver="$("$SCRIPT" --version | awk '{print $2}')"
 newest="$(grep -m1 -o '^## \[[0-9.]*\]' "$ROOT/CHANGELOG.md" | tr -d '#[] ')"
 if [ "$ver" = "$newest" ]; then
@@ -185,6 +184,27 @@ PY
         ok "human output moved to stderr"
     else
         no "human output did not move to stderr"
+    fi
+
+    # A failed run must emit an `error` event, not just exit 1. Retries are cut
+    # to one so this stays fast.
+    env TRANSCRIBE_RETRIES=1 "$SCRIPT" --json-events "$TMP/nope.mp4" \
+        >"$TMP/evfail.json" 2>/dev/null
+    if python3 - "$TMP/evfail.json" <<'PY'
+import json, sys
+rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+names = [row["event"] for row in rows]
+assert "error" in names, names
+failure = next(row for row in rows if row["event"] == "error")
+assert failure.get("stage") == "download", failure
+assert "message" in failure, failure
+assert names[-1] == "done", names
+assert rows[-1]["status"] == "partial", rows[-1]
+PY
+    then
+        ok "failed run emits an error event before done(partial)"
+    else
+        no "failed run did not emit a usable error event"
     fi
 fi
 

@@ -4,6 +4,18 @@ All notable changes to this project. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-10-29
+
+### Fixed
+
+- **`error` events are actually emitted.** `--json-events` documented an `error`
+  event but no failure path produced one, so a consumer only saw `done(partial)`.
+  Download, no-audio, transcribe, chunk-split, chunk-transcribe and render failures
+  now emit `{"event":"error","stage":…,"item":…,"message":…}`.
+  Found by field-testing the `youtube-ingest` adapter against the real binary: its
+  error message fell back to the CLI's generic summary line.
+- Offline test asserts a failed run emits `error` before `done(partial)`.
+
 ## [0.6.0] - 2026-10-29
 
 A machine-readable progress stream, so a GUI or agent never has to scrape text.
