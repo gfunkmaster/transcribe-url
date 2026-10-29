@@ -295,8 +295,8 @@ keeps the plain `[mm:ss]` anchor plus `source_url`.
 ```bash
 ./test/smoke.sh                 # offline: CLI contract, dependency detection, cleanup,
                                 # renderer, output layout, index, json events
-                                # (54 checks incl. Python unit tests)
-SMOKE_NETWORK=1 ./test/smoke.sh # + real pipeline with whisper-tiny (73 checks)
+                                # (55 checks incl. Python unit tests)
+SMOKE_NETWORK=1 ./test/smoke.sh # + real pipeline with whisper-tiny (74 checks)
 shellcheck -x transcribe-url.sh install.sh test/smoke.sh
 ./install.sh --check            # report missing dependencies, change nothing
 ```

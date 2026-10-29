@@ -165,10 +165,11 @@ else
 import json, sys
 rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
 names = [row["event"] for row in rows]
-assert names == ["dry_run", "done"], names
+assert names == ["start", "dry_run", "done"], names
 assert rows[0]["model"], "model missing"
+assert rows[0]["formats"] == "txt,srt", rows[0]
 assert "outdir" in rows[0], "outdir missing"
-assert rows[1]["status"] == "dry-run", rows[1]
+assert rows[2]["status"] == "dry-run", rows[2]
 PY
     then
         ok "dry run emits NDJSON events on stdout"
@@ -186,25 +187,44 @@ PY
         no "human output did not move to stderr"
     fi
 
-    # A failed run must emit an `error` event, not just exit 1. Retries are cut
-    # to one so this stays fast.
+    # A failed run must emit an `error` event, not just exit 1. On a bare machine
+    # the failure happens at preflight (no yt-dlp), which now also emits one.
+    # Retries are cut to one so this stays fast.
     env TRANSCRIBE_RETRIES=1 "$SCRIPT" --json-events "$TMP/nope.mp4" \
         >"$TMP/evfail.json" 2>/dev/null
     if python3 - "$TMP/evfail.json" <<'PY'
 import json, sys
 rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
 names = [row["event"] for row in rows]
+assert names and names[0] == "start", names
 assert "error" in names, names
 failure = next(row for row in rows if row["event"] == "error")
-assert failure.get("stage") == "download", failure
-assert "message" in failure, failure
-assert names[-1] == "done", names
-assert rows[-1]["status"] == "partial", rows[-1]
+assert failure.get("message"), failure
 PY
     then
-        ok "failed run emits an error event before done(partial)"
+        ok "failed run emits an error event"
     else
         no "failed run did not emit a usable error event"
+    fi
+
+    # With dependencies present the failure is a download failure and the run ends
+    # with done(partial); without them it is a preflight death (no done event).
+    if command -v yt-dlp >/dev/null 2>&1; then
+        if python3 - "$TMP/evfail.json" <<'PY'
+import json, sys
+rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+failure = next(row for row in rows if row["event"] == "error")
+assert failure.get("stage") == "download", failure
+assert rows[-1]["event"] == "done", rows[-1]
+assert rows[-1]["status"] == "partial", rows[-1]
+PY
+        then
+            ok "download failure carries stage=download and ends done(partial)"
+        else
+            no "download failure event shape is wrong"
+        fi
+    else
+        printf '  skip  download-failure event shape (needs yt-dlp installed)\n'
     fi
 fi
 

@@ -133,6 +133,7 @@ EOF
 }
 
 die() {
+    ev error message=s:"$*"
     printf 'error: %s\n' "$*" >&2
     exit 1
 }
@@ -172,7 +173,7 @@ json_escape() {
 # Values are strings unless prefixed with n: (number, written unquoted).
 # stderr is used so the human-readable stdout stays untouched.
 ev() {
-    [ "$JSON_EVENTS" -eq 1 ] || return 0
+    [ "$EVENTS_READY" -eq 1 ] || return 0
     local out kv key value
     out="{\"event\":\"$(json_escape "$1")\""
     shift
@@ -215,6 +216,7 @@ DRY_RUN=0
 INDEX=0
 REVEAL=0
 JSON_EVENTS=0
+EVENTS_READY=0
 RETRIES="${TRANSCRIBE_RETRIES:-3}"
 
 while [ $# -gt 0 ]; do
@@ -266,6 +268,7 @@ fi
 # stderr (mlx-whisper's progress bars already go there). fd 4 keeps the real stdout.
 if [ "$JSON_EVENTS" -eq 1 ]; then
     exec 4>&1 1>&2
+    EVENTS_READY=1
 fi
 
 # Validate the arguments before touching the environment: a typo in -f should be
@@ -312,6 +315,10 @@ fi
 
 # Comma-joined, trimmed format list for messages and events.
 FORMATS_LIST="$(printf '%s' "$SEEN_FORMATS" | sed -e 's/^ *//' -e 's/ *$//' -e 's/ /,/g')"
+
+# Emitted after argument validation but before any dependency check, so a
+# preflight death still has a preceding `start` event.
+ev start tool=s:transcribe-url version=s:"$VERSION" model=s:"$MODEL" outdir=s:"$OUTDIR" formats=s:"$FORMATS_LIST"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     printf 'dry run - nothing will be downloaded or written\n'
@@ -397,8 +404,6 @@ fi
 exit_status=0
 processed=0
 skipped=0
-
-ev start tool=s:transcribe-url version=s:"$VERSION" model=s:"$MODEL" outdir=s:"$OUTDIR" formats=s:"$FORMATS_LIST"
 
 for src in "$@"; do
     printf '\n==> %s\n' "$src"

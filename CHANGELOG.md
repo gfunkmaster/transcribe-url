@@ -15,6 +15,10 @@ All notable changes to this project. Format loosely follows
   Found by field-testing the `youtube-ingest` adapter against the real binary: its
   error message fell back to the CLI's generic summary line.
 - Offline test asserts a failed run emits `error` before `done(partial)`.
+- Preflight deaths (missing `yt-dlp`/`ffmpeg`/`mlx_whisper`, bad model path) now emit
+  `error` too — `die` emits it — and `start` is emitted *before* the dependency check,
+  so a consumer always sees a run begin, even when it dies immediately. Verified on a
+  simulated bare runner (`env PATH=/usr/bin:/bin`).
 
 ## [0.6.0] - 2026-10-29
 
