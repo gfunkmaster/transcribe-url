@@ -34,7 +34,7 @@ resolve_self_dir() {
 }
 
 PROG="$(basename "$0")"
-VERSION="0.5.0"
+VERSION="0.6.0"
 SELF_DIR="$(resolve_self_dir "$0")"
 RENDER="$SELF_DIR/lib/render.py"
 MERGE_CHUNKS="$SELF_DIR/lib/merge_chunks.py"
@@ -93,6 +93,8 @@ Options:
       --index                Write/refresh index.html in the output dir (browsable
                              list of every source); with no URL it only rebuilds it
       --reveal               Open the output dir in Finder when the run finishes (macOS)
+      --json-events          Emit NDJSON progress events on stderr (for GUIs/agents);
+                             stdout keeps the normal human-readable output
       --dry-run              Print what would be done, then exit without downloading
   -k, --keep-audio           Keep the extracted audio files (prints their path)
   -h, --help                 Show this help
@@ -155,6 +157,36 @@ sha256_of() {
     fi
 }
 
+# json_escape <string> - minimal JSON string escaping (backslash, quote, controls)
+json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+# ev <event> [key value]... - one NDJSON line on stderr when --json-events is set.
+# Values are strings unless prefixed with n: (number, written unquoted).
+# stderr is used so the human-readable stdout stays untouched.
+ev() {
+    [ "$JSON_EVENTS" -eq 1 ] || return 0
+    local out kv key value
+    out="{\"event\":\"$(json_escape "$1")\""
+    shift
+    for kv in "$@"; do
+        key="${kv%%=*}"
+        value="${kv#*=}"
+        case "$value" in
+            n:*) out="$out,\"$(json_escape "$key")\":${value#n:}" ;;
+            *)   out="$out,\"$(json_escape "$key")\":\"$(json_escape "${value#s:}")\"" ;;
+        esac
+    done
+    printf '%s}\n' "$out" >&4
+}
+
 # model_revision <repo-id> - commit hash of the locally cached snapshot, or empty.
 # Recorded in md frontmatter so an upstream weight update is detectable.
 model_revision() {
@@ -182,6 +214,7 @@ FORCE=0
 DRY_RUN=0
 INDEX=0
 REVEAL=0
+JSON_EVENTS=0
 RETRIES="${TRANSCRIBE_RETRIES:-3}"
 
 while [ $# -gt 0 ]; do
@@ -202,6 +235,7 @@ while [ $# -gt 0 ]; do
         --force)                FORCE=1; shift ;;
         --index)                INDEX=1; shift ;;
         --reveal)               REVEAL=1; shift ;;
+        --json-events)          JSON_EVENTS=1; shift ;;
         --dry-run)              DRY_RUN=1; shift ;;
         -k|--keep-audio)        KEEP_AUDIO=1; shift ;;
         -h|--help)              usage; exit 0 ;;
@@ -227,6 +261,12 @@ if [ -n "$BATCH_FILE" ]; then
 fi
 
 [ $# -gt 0 ] || [ "$INDEX" -eq 1 ] || { usage >&2; exit 2; }
+
+# --json-events: stdout carries only NDJSON events, every human/log line moves to
+# stderr (mlx-whisper's progress bars already go there). fd 4 keeps the real stdout.
+if [ "$JSON_EVENTS" -eq 1 ]; then
+    exec 4>&1 1>&2
+fi
 
 # Validate the arguments before touching the environment: a typo in -f should be
 # reported as such, even on a machine that has no dependencies installed.
@@ -270,6 +310,9 @@ if [ ${#REQUESTED_MLX[@]} -eq 0 ] && [ ${#REQUESTED_EXTRA[@]} -eq 0 ]; then
     die "no output formats requested"
 fi
 
+# Comma-joined, trimmed format list for messages and events.
+FORMATS_LIST="$(printf '%s' "$SEEN_FORMATS" | sed -e 's/^ *//' -e 's/ *$//' -e 's/ /,/g')"
+
 if [ "$DRY_RUN" -eq 1 ]; then
     printf 'dry run - nothing will be downloaded or written\n'
     printf '  model:   %s\n  formats: %s\n' "$MODEL" \
@@ -288,6 +331,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
             printf '  download audio + transcribe: %s\n' "$src"
         fi
     done
+    ev dry_run model=s:"$MODEL" outdir=s:"$OUTDIR" formats=s:"$FORMATS_LIST"
+    ev "done" processed=n:0 skipped=n:0 outdir=s:"$OUTDIR" status=s:dry-run
     exit 0
 fi
 
@@ -353,8 +398,11 @@ exit_status=0
 processed=0
 skipped=0
 
+ev start tool=s:transcribe-url version=s:"$VERSION" model=s:"$MODEL" outdir=s:"$OUTDIR" formats=s:"$FORMATS_LIST"
+
 for src in "$@"; do
     printf '\n==> %s\n' "$src"
+    ev source input=s:"$src"
     audio_files=()
 
     if [ -f "$src" ]; then
@@ -365,6 +413,7 @@ for src in "$@"; do
         find "$WORK" -mindepth 2 -maxdepth 2 -type f -name '*.wav' -delete
 
         printf -- '--> fetching audio (audio stream only)\n'
+        ev stage name=s:download input=s:"$src"
 
         # One subdirectory per media item named <extractor>-<id>. That name becomes
         # the transcript folder, so it is derived from the download path instead of
@@ -442,6 +491,7 @@ for src in "$@"; do
             if [ "$all_present" -eq 1 ]; then
                 printf -- '--> skipping %s: outputs already exist in %s (use --force to redo)\n' \
                     "$out_base" "$dest_dir"
+                ev skip title=s:"$out_base" dest=s:"$dest_dir"
                 skipped=$((skipped + 1))
                 continue
             fi
@@ -456,6 +506,7 @@ for src in "$@"; do
         fi
         if [ "$dur" -gt 0 ]; then
             printf -- '    audio length: %d:%02d\n' "$((dur / 60))" "$((dur % 60))"
+            ev audio seconds=n:"$dur"
         fi
 
         # Options shared by the single pass and by every chunk.
@@ -485,6 +536,7 @@ for src in "$@"; do
         fi
 
         printf -- '--> transcribing %s (model: %s)\n' "$out_base" "$MODEL"
+        ev item title=s:"$out_base" dest=s:"$dest_dir" model=s:"$MODEL"
         item_failed=0
         if [ "$chunked" -eq 0 ]; then
             # One transcription pass, all formats written, then copy what was asked
@@ -565,6 +617,7 @@ for src in "$@"; do
             if [ -f "$WORK/$out_base.$f" ]; then
                 cp "$WORK/$out_base.$f" "$dest_dir/"
                 printf -- '    wrote %s\n' "$dest_dir/$out_base.$f"
+                ev wrote path=s:"$dest_dir/$out_base.$f" format=s:"$f"
             else
                 printf 'error: expected %s was not produced\n' "$WORK/$out_base.$f" >&2
                 item_failed=1
@@ -600,6 +653,7 @@ for src in "$@"; do
                 # stdout is the list of written files; stderr carries notices.
                 while IFS= read -r written; do
                     printf -- '    wrote %s\n' "$written"
+                    ev wrote path=s:"$written" format=s:rendered
                 done <"$WORK/render.out"
                 if [ -s "$WORK/render.err" ]; then
                     sed 's/^/    /' "$WORK/render.err"
@@ -627,6 +681,7 @@ if [ "$INDEX" -eq 1 ] && [ "$processed" -gt 0 ]; then
     if "$PYTHON" "$INDEXER" --outdir "$OUTDIR" --tool-version "$VERSION" \
             >"$WORK/index.out" 2>"$WORK/index.err"; then
         printf -- '--> wrote %s\n' "$(head -1 "$WORK/index.out")"
+        ev index path=s:"$(head -1 "$WORK/index.out")"
         if [ -s "$WORK/index.err" ]; then
             sed 's/^/    /' "$WORK/index.err"
         fi
@@ -651,5 +706,10 @@ fi
 printf '\n'
 if [ "$exit_status" -ne 0 ]; then
     printf 'some items failed (see errors above)\n' >&2
+fi
+if [ "$exit_status" -eq 0 ]; then
+    ev "done" processed=n:"$processed" skipped=n:"$skipped" outdir=s:"$OUTDIR" status=s:ok
+else
+    ev "done" processed=n:"$processed" skipped=n:"$skipped" outdir=s:"$OUTDIR" status=s:partial
 fi
 exit "$exit_status"
