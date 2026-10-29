@@ -114,7 +114,7 @@ case_ 1 "unsupported format" "bad --emit value is rejected" "$SCRIPT" --emit doc
 case_ 2 "needs a value" "--window without a value exits 2" "$SCRIPT" --window
 case_ 1 "whole number" "--window rejects non-numeric values" "$SCRIPT" --window abc https://example.com
 case_ 1 "greater than 0" "--window 0 is rejected" "$SCRIPT" --window 0 https://example.com
-case_ 0 "0.5.0" "--version prints the version" "$SCRIPT" --version
+case_ 0 "0.6.0" "--version prints the version" "$SCRIPT" --version
 ver="$("$SCRIPT" --version | awk '{print $2}')"
 newest="$(grep -m1 -o '^## \[[0-9.]*\]' "$ROOT/CHANGELOG.md" | tr -d '#[] ')"
 if [ "$ver" = "$newest" ]; then
@@ -153,6 +153,39 @@ if [ "$(temp_dirs)" = "$before" ]; then
     ok "dry run leaves nothing behind"
 else
     no "dry run leaked a temp dir"
+fi
+
+# --- offline: json events ----------------------------------------------------
+printf '\nJSON events (--json-events)\n'
+if ! command -v python3 >/dev/null 2>&1; then
+    printf '  skip  json event tests (python3 not on PATH)\n'
+else
+    "$SCRIPT" --json-events --dry-run https://example.com/x \
+        >"$TMP/ev.json" 2>"$TMP/ev.err"
+    if python3 - "$TMP/ev.json" <<'PY'
+import json, sys
+rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+names = [row["event"] for row in rows]
+assert names == ["dry_run", "done"], names
+assert rows[0]["model"], "model missing"
+assert "outdir" in rows[0], "outdir missing"
+assert rows[1]["status"] == "dry-run", rows[1]
+PY
+    then
+        ok "dry run emits NDJSON events on stdout"
+    else
+        no "dry run NDJSON events are wrong"
+    fi
+    if grep -qv '^{' "$TMP/ev.json" 2>/dev/null; then
+        no "stdout contains non-JSON lines under --json-events"
+    else
+        ok "stdout is pure NDJSON under --json-events"
+    fi
+    if grep -q 'dry run - nothing' "$TMP/ev.err" 2>/dev/null; then
+        ok "human output moved to stderr"
+    else
+        no "human output did not move to stderr"
+    fi
 fi
 
 # --- offline: index-only mode ------------------------------------------------
@@ -460,6 +493,29 @@ EOF
             ok "--reveal opened the output folder"
         else
             no "--reveal did not call open with the output dir"
+        fi
+
+        # --json-events: a real run must produce a parseable, ordered event stream.
+        if "$SCRIPT" --json-events -m mlx-community/whisper-tiny -f txt --emit md --index \
+            -o "$TMP/e2e/ev" "$TMP/e2e/fixture.wav" >"$TMP/e2e/ev.json" 2>"$TMP/e2e/ev.err" \
+            && python3 - "$TMP/e2e/ev.json" <<'PY'
+import json, sys
+rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+names = [row["event"] for row in rows]
+for required in ("start", "source", "item", "wrote", "index", "done"):
+    assert required in names, (required, names)
+assert names[0] == "start", names
+assert names[-1] == "done", names
+assert rows[-1]["status"] == "ok", rows[-1]
+assert rows[-1]["processed"] == 1, rows[-1]
+paths = [row["path"] for row in rows if row["event"] == "wrote"]
+assert any(path.endswith(".md") for path in paths), paths
+assert any(path.endswith(".txt") for path in paths), paths
+PY
+        then
+            ok "--json-events yields an ordered, parseable event stream"
+        else
+            no "--json-events stream is wrong"
         fi
 
         case_ 1 "" "nonexistent model id fails with exit 1" \

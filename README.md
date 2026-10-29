@@ -125,6 +125,30 @@ output folder:
 Open it with `open transcripts/index.html`, or pair it with `--reveal` so Finder
 shows you the folder (and the page) right after a run.
 
+### Driving it from a GUI or an agent: `--json-events`
+
+```bash
+transcribe-url --json-events --emit md --index <URL> 2>/dev/null
+```
+
+With `--json-events`, **stdout is pure NDJSON** (one object per line) and every
+human-readable line moves to stderr — so a consumer never parses prose:
+
+```json
+{"event":"start","tool":"transcribe-url","version":"0.6.0","model":"…","outdir":"/x/transcripts","formats":"txt,srt,md"}
+{"event":"source","input":"https://x.com/…"}
+{"event":"stage","name":"download","input":"https://x.com/…"}
+{"event":"audio","seconds":102}
+{"event":"item","title":"Some title [1600649511827013632]","dest":"/x/transcripts/twitter-1600649511827013632","model":"…"}
+{"event":"wrote","path":"/x/transcripts/twitter-1600649511827013632/….srt","format":"srt"}
+{"event":"wrote","path":"/x/transcripts/twitter-1600649511827013632/….md","format":"rendered"}
+{"event":"index","path":"/x/transcripts/index.html"}
+{"event":"done","processed":1,"skipped":0,"outdir":"/x/transcripts","status":"ok"}
+```
+
+`skip` (already done), `dry_run` and `error` events exist too. Numbers are unquoted,
+strings are escaped; `status` is `ok` or `partial`.
+
 ```
   -o, --output-dir DIR       Where to write transcripts (default: ./transcripts)
       --flat                 Write into the output dir instead of a per-source folder
@@ -144,6 +168,8 @@ shows you the folder (and the page) right after a run.
       --index                Write/refresh index.html in the output dir (browsable list of
                              every source); with no URL it only rebuilds the page
       --reveal               Open the output dir in Finder when the run finishes (macOS)
+      --json-events          NDJSON events on stdout for GUIs/agents (human output moves
+                             to stderr)
       --dry-run              Show the plan, download nothing
   -k, --keep-audio           Keep extracted audio (prints the path)
   -h, --help                 Show help
@@ -268,9 +294,9 @@ keeps the plain `[mm:ss]` anchor plus `source_url`.
 
 ```bash
 ./test/smoke.sh                 # offline: CLI contract, dependency detection, cleanup,
-                                # renderer merging/metadata/deep links, output layout,
-                                # index generation (51 checks incl. Python unit tests)
-SMOKE_NETWORK=1 ./test/smoke.sh # + real pipeline with whisper-tiny (69 checks)
+                                # renderer, output layout, index, json events
+                                # (54 checks incl. Python unit tests)
+SMOKE_NETWORK=1 ./test/smoke.sh # + real pipeline with whisper-tiny (73 checks)
 shellcheck -x transcribe-url.sh install.sh test/smoke.sh
 ./install.sh --check            # report missing dependencies, change nothing
 ```

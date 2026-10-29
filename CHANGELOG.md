@@ -4,7 +4,26 @@ All notable changes to this project. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.5.0] - 2026-10-29
+## [0.6.0] - 2026-10-29
+
+A machine-readable progress stream, so a GUI or agent never has to scrape text.
+
+### Added
+
+- `--json-events` — emits NDJSON events on **stdout**, one object per line, and moves
+  all human-readable output to stderr (where mlx-whisper's progress bars already go).
+  In this mode stdout is pure JSON: `json.loads()` line by line, nothing to filter.
+  Events: `start`, `source`, `stage`, `audio`, `item`, `wrote`, `skip`, `index`,
+  `dry_run`, `done` (with `processed`/`skipped`/`status`), plus `error` on failures.
+  Numbers are unquoted (`{"seconds":102}`), everything else is spelled out.
+- Offline test for the dry-run stream (parseable, ordered, human text on stderr) and
+  an end-to-end test asserting `start → … → wrote(.md/.txt) → index → done(ok)`.
+
+### Changed
+
+- Anything a UI needs is now expressible without parsing prose: this was the missing
+  half of the contract behind `--index` and the md/jsonl outputs.
+
 
 A browsable UI for the output folder, without building an app.
 
