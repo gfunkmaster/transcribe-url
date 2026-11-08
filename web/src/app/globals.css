@@ -1,0 +1,43 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fafafa;
+  --fg: #1a1a1a;
+  --muted: #6b6b6b;
+  --line: #dcdcdc;
+  --accent: #2456d6;
+  --err: #b3261e;
+  --ok: #1e7a3c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141414;
+    --fg: #ececec;
+    --muted: #9a9a9a;
+    --line: #333;
+    --accent: #7aa2ff;
+    --err: #ff8a80;
+    --ok: #6fd08c;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, sans-serif; }
+a { color: var(--accent); }
+.top { display: flex; gap: 1rem; align-items: baseline; padding: 0.9rem 1.25rem; border-bottom: 1px solid var(--line); }
+.top a { font-weight: 600; text-decoration: none; color: var(--fg); }
+main { max-width: 56rem; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+.muted { color: var(--muted); font-size: 0.9rem; }
+form.row { display: flex; gap: 0.5rem; }
+input[type="url"], input[type="search"] { flex: 1; padding: 0.55rem 0.7rem; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+button { padding: 0.55rem 1rem; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font: inherit; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
+ol.timeline { list-style: none; padding: 0; margin: 1rem 0; font: 0.85rem/1.5 ui-monospace, monospace; }
+ol.timeline li { padding: 0.15rem 0; }
+.err { color: var(--err); }
+.ok { color: var(--ok); }
+ul.library { list-style: none; padding: 0; }
+ul.library li { padding: 0.8rem 0; border-bottom: 1px solid var(--line); }
+ul.library a.title { font-weight: 600; text-decoration: none; }
+.badge { font-size: 0.75rem; padding: 0.05rem 0.4rem; border: 1px solid var(--line); border-radius: 4px; margin-left: 0.4rem; }
+pre.transcript { white-space: pre-wrap; word-break: break-word; font: 0.9rem/1.6 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 6px; padding: 1rem; }
+.brief table { border-collapse: collapse; }
+.brief th, .brief td { border: 1px solid var(--line); padding: 0.3rem 0.6rem; }

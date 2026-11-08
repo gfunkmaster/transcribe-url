@@ -191,6 +191,30 @@ Yes. Public video posts work **without logging in** (yt-dlp uses the guest-token
 If a post is protected, age-restricted, or you hit a rate limit, pass
 `--cookies-from-browser safari` (or `chrome`, `firefox`, …).
 
+## Web UI (optional)
+
+A local Next.js app in [`web/`](web/) wraps the CLI: paste a URL, watch progress live,
+browse and read what you have, and generate an expert **brief** for any transcript.
+
+```bash
+cd web
+npm install
+cp .env.example .env.local      # only needed for "Interpret": set ANTHROPIC_API_KEY
+npm run dev                     # http://127.0.0.1:3000
+```
+
+- It runs the real `transcribe-url.sh` (macOS / Apple Silicon requirements still apply),
+  so it cannot be deployed to Vercel or any serverless host. Run it on your own machine.
+- Jobs run one at a time and are kept in memory; finished transcripts are on disk and
+  always show up in the library.
+- **Interpret** sends the transcript to the Claude API and saves `<name>.brief.md` next
+  to it. That is the only thing that leaves your machine, and it is billed to your key.
+- Security: bound to `127.0.0.1`, non-loopback `Host` and cross-origin requests are
+  rejected, only `http(s)` URLs are accepted. Don't expose the port.
+- Config: `TRANSCRIBE_OUTDIR` (default `../transcripts`), `TRANSCRIBE_BIN`,
+  `ANTHROPIC_MODEL` (default `claude-opus-5-5`).
+- Checks: `npm run typecheck && npm run lint && npm test && npm run build`.
+
 ## Agent-friendly outputs: `md` and `jsonl`
 
 `txt`/`srt` are for humans. For pipelines there are two more formats, rendered by

@@ -4,6 +4,20 @@ All notable changes to this project. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`web/` — a local web UI** (Next.js App Router, TypeScript). Paste a URL, watch live
+  progress, browse the transcripts in `./transcripts`, and click **Interpret** to write a
+  `<name>.brief.md` next to a transcript using the Claude API.
+  - Drives the unchanged CLI through `--json-events`; one job at a time, in memory.
+  - Local only: binds to `127.0.0.1`, rejects non-loopback `Host` and cross-origin
+    requests, accepts only `http(s)` URLs, and spawns with an argument array and `--`.
+  - Interpret needs `ANTHROPIC_API_KEY` (in `web/.env.local`); model defaults to
+    `claude-opus-5-5` (`ANTHROPIC_MODEL` to override). Server-side fallback is enabled.
+  - CI job `web` runs typecheck, lint, tests and build.
+
 ## [0.6.1] - 2026-10-29
 
 ### Fixed
