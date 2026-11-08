@@ -205,6 +205,13 @@ npm run dev                     # http://127.0.0.1:3000
 
 - It runs the real `transcribe-url.sh` (macOS / Apple Silicon requirements still apply),
   so it cannot be deployed to Vercel or any serverless host. Run it on your own machine.
+- **Posts without video** (text, photos, a quoted post) are read directly and saved next to
+  your transcripts as `twitter-<id>/` (note + `image-N` files). It uses X's public embed
+  endpoint, which is undocumented and may change; long posts (over ~280 characters) are
+  truncated, and X Articles and login-only posts are not readable. Posts with video use the
+  normal transcription path. For **Interpret**, tick "Include images" to send a post's
+  images to the model (it must support images; Claude does, and DeepSeek's `deepseek-flash`
+  read a test diagram correctly).
 - Jobs run one at a time and are kept in memory; finished transcripts are on disk and
   always show up in the library.
 - **Interpret** writes `<name>.brief.md` next to a transcript using an LLM of your choice.

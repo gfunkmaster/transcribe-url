@@ -1,13 +1,16 @@
-import { INTERPRET_SYSTEM_PROMPT } from "./interpret-prompt";
+import { systemPromptFor } from "./interpret-prompt";
 import type { Meta } from "./library";
-import { LlmError, type LlmProvider, type LlmResult } from "./llm/types";
+import { LlmError, type LlmImage, type LlmProvider, type LlmResult } from "./llm/types";
 
-export function buildUserMessage(meta: Meta, body: string): string {
+export type SourceKind = "video" | "post";
+
+export function buildUserMessage(meta: Meta, body: string, kind: SourceKind = "video"): string {
   const header = ["title", "uploader", "upload_date", "duration", "language", "model", "source_url"]
     .filter((key) => meta[key])
     .map((key) => `${key}: ${meta[key]}`)
     .join("\n");
-  return `<metadata>\n${header}\n</metadata>\n\n<transcript>\n${body}\n</transcript>\n\nInterpret this transcript.`;
+  const tag = kind === "post" ? "post" : "transcript";
+  return `<metadata>\n${header}\n</metadata>\n\n<${tag}>\n${body}\n</${tag}>\n\nInterpret this ${tag}.`;
 }
 
 export async function interpretTranscript(args: {
@@ -15,10 +18,16 @@ export async function interpretTranscript(args: {
   meta: Meta;
   body: string;
   maxInputChars: number;
+  kind?: SourceKind;
+  images?: LlmImage[];
 }): Promise<LlmResult> {
-  const { provider, meta, body, maxInputChars } = args;
+  const { provider, meta, body, maxInputChars, kind = "video", images } = args;
   if (body.length > maxInputChars) {
     throw new LlmError(`transcript is too large (${body.length} chars, limit ${maxInputChars})`, 413);
   }
-  return provider.complete({ system: INTERPRET_SYSTEM_PROMPT, user: buildUserMessage(meta, body) });
+  return provider.complete({
+    system: systemPromptFor(kind),
+    user: buildUserMessage(meta, body, kind),
+    ...(images && images.length > 0 ? { images } : {}),
+  });
 }

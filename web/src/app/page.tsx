@@ -20,6 +20,7 @@ export default async function Home() {
               <Link className="title" href={`/sources/${encodeURIComponent(s.slug)}`}>
                 {s.title}
               </Link>
+              {s.kind === "post" && <span className="badge">post</span>}
               {s.hasBrief && <span className="badge">brief</span>}
               <div className="muted">
                 {[s.extractor, s.uploader, s.uploadDate, s.duration, s.language].filter(Boolean).join(" · ")}

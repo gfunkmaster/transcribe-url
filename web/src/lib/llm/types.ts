@@ -1,6 +1,14 @@
+export interface LlmImage {
+  mediaType: string;
+  /** base64, no data: prefix */
+  data: string;
+}
+
 export interface LlmRequest {
   system: string;
   user: string;
+  /** Sent only when the caller asks; the model must support vision. */
+  images?: LlmImage[];
 }
 
 export interface LlmResult {

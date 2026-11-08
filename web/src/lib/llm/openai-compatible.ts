@@ -24,7 +24,7 @@ export function createOpenAiCompatibleProvider(options: {
     id: options.id,
     label: options.label,
     model: options.model,
-    async complete({ system, user }: LlmRequest): Promise<LlmResult> {
+    async complete({ system, user, images = [] }: LlmRequest): Promise<LlmResult> {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (options.apiKey) headers.Authorization = `Bearer ${options.apiKey}`;
 
@@ -39,7 +39,19 @@ export function createOpenAiCompatibleProvider(options: {
             stream: false,
             messages: [
               { role: "system", content: system },
-              { role: "user", content: user },
+              {
+                role: "user",
+                content:
+                  images.length === 0
+                    ? user
+                    : [
+                        { type: "text", text: user },
+                        ...images.map((image) => ({
+                          type: "image_url",
+                          image_url: { url: `data:${image.mediaType};base64,${image.data}` },
+                        })),
+                      ],
+              },
             ],
           }),
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),

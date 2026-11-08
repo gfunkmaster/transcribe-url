@@ -8,22 +8,30 @@ export default function InterpretButton({
   slug,
   hasBrief,
   provider,
+  imageCount = 0,
 }: {
   slug: string;
   hasBrief: boolean;
   provider: ProviderStatus;
+  /** Number of saved images (posts only); 0 hides the checkbox. */
+  imageCount?: number;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [includeImages, setIncludeImages] = useState(false);
 
   async function run() {
     setBusy(true);
     setMessage(null);
     setFailed(false);
     try {
-      const response = await fetch(`/api/sources/${encodeURIComponent(slug)}/interpret`, { method: "POST" });
+      const response = await fetch(`/api/sources/${encodeURIComponent(slug)}/interpret`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ includeImages }),
+      });
       const body = (await response.json()) as {
         error?: string;
         provider?: string;
@@ -51,6 +59,12 @@ export default function InterpretButton({
       <button type="button" onClick={run} disabled={busy || !provider.ok}>
         {busy ? "Interpreting… (can take a minute)" : hasBrief ? "Re-interpret" : "Interpret"}
       </button>
+      {imageCount > 0 && (
+        <label className="muted" style={{ display: "block", margin: "0.5rem 0" }}>
+          <input type="checkbox" checked={includeImages} onChange={(e) => setIncludeImages(e.target.checked)} /> Include{" "}
+          {imageCount} image{imageCount === 1 ? "" : "s"} (needs a model that can read images; if it fails, untick)
+        </label>
+      )}
       {provider.ok ? (
         <p className="muted">
           {provider.local

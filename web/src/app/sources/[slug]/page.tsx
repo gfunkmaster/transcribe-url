@@ -28,7 +28,7 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
         )}
       </p>
 
-      <InterpretButton slug={source.slug} hasBrief={source.brief !== null} provider={describeProvider()} />
+      <InterpretButton slug={source.slug} hasBrief={source.brief !== null} provider={describeProvider()} imageCount={source.images.length} />
 
       {source.brief && (
         <section className="brief">
@@ -38,7 +38,22 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
         </section>
       )}
 
-      <h2>Transcript</h2>
+      {source.images.length > 0 && (
+        <section>
+          <h2>Images</h2>
+          {source.images.map((name) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={name}
+              src={`/api/sources/${encodeURIComponent(source.slug)}/media/${name}`}
+              alt={name}
+              style={{ maxWidth: "100%", display: "block", margin: "0 0 1rem" }}
+            />
+          ))}
+        </section>
+      )}
+
+      <h2>{source.kind === "post" ? "Post" : "Transcript"}</h2>
       <pre className="transcript">{source.body}</pre>
     </>
   );

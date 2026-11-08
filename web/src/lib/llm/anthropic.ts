@@ -22,7 +22,7 @@ export function createAnthropicProvider(options: {
     id: "anthropic",
     label: "Anthropic Claude",
     model: options.model,
-    async complete({ system, user }: LlmRequest): Promise<LlmResult> {
+    async complete({ system, user, images = [] }: LlmRequest): Promise<LlmResult> {
       let message: Anthropic.Beta.Messages.BetaMessage;
       try {
         // Streaming + finalMessage avoids HTTP timeouts on long outputs. `fallbacks: "default"`
@@ -36,7 +36,18 @@ export function createAnthropicProvider(options: {
             betas: ["server-side-fallback-2026-07-01"],
             fallbacks: "default",
             system,
-            messages: [{ role: "user", content: user }],
+            messages: [
+              {
+                role: "user",
+                content: [
+                  ...images.map((image) => ({
+                    type: "image",
+                    source: { type: "base64", media_type: image.mediaType, data: image.data },
+                  })),
+                  { type: "text", text: user },
+                ],
+              },
+            ],
           })
           .finalMessage();
       } catch (error) {
