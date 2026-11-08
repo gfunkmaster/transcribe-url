@@ -27,3 +27,8 @@ __pycache__/
 .idea/
 .vscode/
 *.log
+
+# web UI: its JSON config/lockfile must be tracked despite the *.json rule above
+!web/package.json
+!web/package-lock.json
+!web/tsconfig.json

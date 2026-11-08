@@ -1,0 +1,44 @@
+import { notFound } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import InterpretButton from "@/components/InterpretButton";
+import { getConfig } from "@/lib/config";
+import { readSource } from "@/lib/library";
+
+export const dynamic = "force-dynamic";
+
+export default async function SourcePage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const source = await readSource(getConfig().outdir, decodeURIComponent(slug));
+  if (!source) notFound();
+
+  return (
+    <>
+      <h1>{source.title}</h1>
+      <p className="muted">
+        {[source.uploader, source.uploadDate, source.duration, source.language].filter(Boolean).join(" · ")}
+        {source.sourceUrl && (
+          <>
+            {" · "}
+            <a href={source.sourceUrl} rel="noreferrer noopener" target="_blank">
+              source
+            </a>
+          </>
+        )}
+      </p>
+
+      <InterpretButton slug={source.slug} hasBrief={source.brief !== null} />
+
+      {source.brief && (
+        <section className="brief">
+          <h2>Brief</h2>
+          {/* react-markdown does not render raw HTML, so model output cannot inject markup. */}
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{source.brief}</ReactMarkdown>
+        </section>
+      )}
+
+      <h2>Transcript</h2>
+      <pre className="transcript">{source.body}</pre>
+    </>
+  );
+}
