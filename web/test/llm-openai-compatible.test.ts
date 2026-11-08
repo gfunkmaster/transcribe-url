@@ -55,4 +55,17 @@ describe("openai-compatible provider", () => {
     ).rejects.toMatchObject({ status: 422 });
     await expect(make(() => Promise.resolve(ok({ choices: [] }))).complete({ system: "s", user: "u" })).rejects.toMatchObject({ status: 502 });
   });
+
+  it("sends images as image_url data URLs after the text, and plain strings otherwise", async () => {
+    const fetchImpl = vi.fn<Fetch>(() => Promise.resolve(ok({ choices: [{ message: { content: "x" } }] })));
+    const provider = make(fetchImpl);
+    await provider.complete({ system: "s", user: "u", images: [{ mediaType: "image/jpeg", data: "QUJD" }] });
+    await provider.complete({ system: "s", user: "u" });
+    const body = (i: number) => JSON.parse(String(fetchImpl.mock.calls[i]?.[1]?.body)) as { messages: { content: unknown }[] };
+    expect(body(0).messages[1]?.content).toEqual([
+      { type: "text", text: "u" },
+      { type: "image_url", image_url: { url: "data:image/jpeg;base64,QUJD" } },
+    ]);
+    expect(body(1).messages[1]?.content).toBe("u");
+  });
 });

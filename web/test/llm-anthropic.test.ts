@@ -40,4 +40,14 @@ describe("anthropic provider", () => {
     const { provider } = fake({ stop_reason: "max_tokens", content: [], usage: { input_tokens: 1, output_tokens: 1 } });
     await expect(provider.complete({ system: "s", user: "u" })).rejects.toMatchObject({ status: 502 });
   });
+
+  it("sends images as base64 blocks before the text", async () => {
+    const { provider, stream } = fake({ stop_reason: "end_turn", model: "m", content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } });
+    await provider.complete({ system: "s", user: "u", images: [{ mediaType: "image/png", data: "QUJD" }] });
+    const messages = (stream.mock.calls[0]?.[0] ?? {}).messages as { content: unknown[] }[];
+    expect(messages[0]?.content).toEqual([
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } },
+      { type: "text", text: "u" },
+    ]);
+  });
 });

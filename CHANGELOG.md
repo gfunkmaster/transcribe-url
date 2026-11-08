@@ -18,6 +18,15 @@ All notable changes to this project. Format loosely follows
     `claude-opus-5-5` (`ANTHROPIC_MODEL` to override). Server-side fallback is enabled.
   - CI job `web` runs typecheck, lint, tests and build.
 
+- **Reads posts without video.** An X/Twitter URL with no video (text, photos, a quoted
+  post) used to fail with "download failed". The web UI now reads it through X's public
+  embed endpoint, saves `twitter-<id>/` with the text as a note (`kind: "post"`) and the
+  images as `image-N.<ext>`, and shows both in the library. **Interpret** understands posts
+  and can send the images to the model (tick "Include images"; needs a vision-capable model).
+  Posts with video still go through the transcription path. Caveats: the embed endpoint is
+  undocumented and may change, long posts (over ~280 characters) come back truncated, and
+  X Articles are not readable.
+
 ### Changed
 
 - **Interpret is provider-agnostic.** Anthropic Claude, DeepSeek, OpenAI, OpenRouter,

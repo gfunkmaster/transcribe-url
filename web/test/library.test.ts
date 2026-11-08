@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { decodeEntities, isSafeSlug, listSources, parseFrontmatter, readSource, resolveSourceDir, writeBrief } from "@/lib/library";
+import { decodeEntities, isSafeMediaName, isSafeSlug, listSources, parseFrontmatter, readSource, resolveSourceDir, writeBrief } from "@/lib/library";
 
 let outdir: string;
 
@@ -82,4 +82,9 @@ describe("library", () => {
     expect(await readSource(outdir, "../etc")).toBeNull();
     expect(await readSource(outdir, "nope")).toBeNull();
   });
+});
+
+describe("isSafeMediaName", () => {
+  it.each(["image-1.jpg", "image-12.png", "image-3.webp", "image-4.gif"])("accepts %s", (n) => expect(isSafeMediaName(n)).toBe(true));
+  it.each(["../image-1.jpg", "image-1.svg", "image-1.jpg/x", "a.md", "image-.jpg", "image-123.jpg", ".env"])("rejects %s", (n) => expect(isSafeMediaName(n)).toBe(false));
 });

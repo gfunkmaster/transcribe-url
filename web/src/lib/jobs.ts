@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createEventParser, type ProgressEvent } from "./events";
+import type { PostHandler } from "./post-job";
 
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
@@ -24,6 +25,8 @@ export interface JobManagerOptions {
   bin: string;
   outdir: string;
   maxHistory?: number;
+  /** Optional: read X/Twitter posts without video directly, before falling back to the CLI. */
+  postHandler?: PostHandler;
 }
 
 const MAX_EVENTS_PER_JOB = 2000;
@@ -113,9 +116,30 @@ export class JobManager {
     }
   }
 
-  private run(job: Job): Promise<void> {
+  private async run(job: Job): Promise<void> {
     job.status = "running";
     this.emit(job, { event: "job", status: "running" });
+    if (this.options.postHandler) {
+      try {
+        const result = await this.options.postHandler(job.url, (event) => this.emit(job, event));
+        if (result === "handled") {
+          job.status = "done";
+          this.emit(job, { event: "job", status: "done" });
+          return;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.emit(job, { event: "error", stage: "read-post", message });
+        job.status = "failed";
+        job.error = message;
+        this.emit(job, { event: "job", status: "failed", error: message });
+        return;
+      }
+    }
+    await this.spawnCli(job);
+  }
+
+  private spawnCli(job: Job): Promise<void> {
     return new Promise((resolve) => {
       let doneStatus: string | undefined;
       const errors: string[] = [];

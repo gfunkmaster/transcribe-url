@@ -12,12 +12,16 @@ export interface SourceSummary {
   language: string;
   sourceUrl: string;
   extractor: string;
+  /** "video" (a transcript) or "post" (a text/image post read directly). */
+  kind: string;
   hasBrief: boolean;
   /** Sort key (ms since epoch). */
   sortKey: number;
 }
 
 export interface SourceDetail extends SourceSummary {
+  /** Saved image file names (posts only), e.g. image-1.jpg. */
+  images: string[];
   meta: Meta;
   body: string;
   brief: string | null;
@@ -38,6 +42,13 @@ export function decodeEntities(text: string): string {
 export function isSafeSlug(slug: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9:_.-]*$/.test(slug) && !slug.includes("..");
 }
+
+/** Image files the post reader saves; the only files the media route will serve. */
+export function isSafeMediaName(name: string): boolean {
+  return /^image-\d{1,2}\.(jpg|png|webp|gif)$/.test(name);
+}
+
+export const MEDIA_TYPES: Record<string, string> = { jpg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
 
 export function resolveSourceDir(outdir: string, slug: string): string | null {
   if (!isSafeSlug(slug)) return null;
@@ -89,6 +100,7 @@ function summarise(slug: string, meta: Meta, hasBrief: boolean, mtimeMs: number)
     language: meta.language ?? "",
     sourceUrl: meta.source_url ?? "",
     extractor: meta.extractor ?? slug.split("-")[0] ?? "",
+    kind: meta.kind === "post" ? "post" : "video",
     hasBrief,
     sortKey: Number.isFinite(transcribedAt) ? transcribedAt : mtimeMs,
   };
@@ -121,9 +133,29 @@ export async function readSource(outdir: string, slug: string): Promise<SourceDe
   const stat = await fs.stat(md);
   const { meta, body } = parseFrontmatter(text);
   const brief = await fs.readFile(briefPathFor(md), "utf8").catch(() => null);
-  return { ...summarise(slug, meta, brief !== null, stat.mtimeMs), meta, body, brief, mdFile: md };
+  const names = await fs.readdir(/* turbopackIgnore: true */ dir).catch(() => [] as string[]);
+  const images = names.filter(isSafeMediaName).sort();
+  return { ...summarise(slug, meta, brief !== null, stat.mtimeMs), images, meta, body, brief, mdFile: md };
 }
 
 export async function writeBrief(mdFile: string, content: string): Promise<void> {
   await fs.writeFile(briefPathFor(mdFile), content, "utf8");
+}
+
+const MAX_IMAGE_TOTAL_BYTES = 20 * 1024 * 1024;
+
+/** Reads a post's saved images as base64 for a vision request, with a total size cap. */
+export async function loadImages(outdir: string, slug: string, names: string[]): Promise<{ mediaType: string; data: string }[]> {
+  const dir = resolveSourceDir(outdir, slug);
+  if (!dir) return [];
+  const out: { mediaType: string; data: string }[] = [];
+  let total = 0;
+  for (const name of names.filter(isSafeMediaName)) {
+    const bytes = await fs.readFile(path.join(/* turbopackIgnore: true */ dir, name));
+    total += bytes.length;
+    if (total > MAX_IMAGE_TOTAL_BYTES) throw new Error("images are too large to send (limit 20 MB in total)");
+    const ext = name.split(".").pop() ?? "";
+    out.push({ mediaType: MEDIA_TYPES[ext] ?? "image/jpeg", data: bytes.toString("base64") });
+  }
+  return out;
 }

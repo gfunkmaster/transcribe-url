@@ -24,6 +24,24 @@ describe("interpretTranscript", () => {
   });
 });
 
+describe("posts", () => {
+  it("uses the post prompt, <post> tags and passes images through", async () => {
+    const complete = vi.fn<(r: LlmRequest) => Promise<LlmResult>>(() => Promise.resolve({ text: "b", model: "m", inputTokens: null, outputTokens: null }));
+    const images = [{ mediaType: "image/jpeg", data: "AAAA" }];
+    await interpretTranscript({ provider: provider(complete), meta: {}, body: "text", maxInputChars: 100, kind: "post", images });
+    const request = complete.mock.calls[0]?.[0];
+    expect(request?.system).toContain("social media post");
+    expect(request?.user).toContain("<post>");
+    expect(request?.images).toEqual(images);
+  });
+
+  it("omits the images field when there are none", async () => {
+    const complete = vi.fn<(r: LlmRequest) => Promise<LlmResult>>(() => Promise.resolve({ text: "b", model: "m", inputTokens: null, outputTokens: null }));
+    await interpretTranscript({ provider: provider(complete), meta: {}, body: "t", maxInputChars: 100, images: [] });
+    expect(complete.mock.calls[0]?.[0]).not.toHaveProperty("images");
+  });
+});
+
 describe("buildUserMessage", () => {
   it("includes only the metadata that exists", () => {
     const text = buildUserMessage({ title: "T", language: "en" }, "body");
