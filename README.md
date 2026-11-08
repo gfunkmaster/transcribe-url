@@ -207,12 +207,17 @@ npm run dev                     # http://127.0.0.1:3000
   so it cannot be deployed to Vercel or any serverless host. Run it on your own machine.
 - Jobs run one at a time and are kept in memory; finished transcripts are on disk and
   always show up in the library.
-- **Interpret** sends the transcript to the Claude API and saves `<name>.brief.md` next
-  to it. That is the only thing that leaves your machine, and it is billed to your key.
+- **Interpret** writes `<name>.brief.md` next to a transcript using an LLM of your choice.
+  Set **one** key in `web/.env.local` and that provider is used; switch provider by
+  switching the key (`ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
+  `OPENROUTER_API_KEY`). Several keys at once need `LLM_PROVIDER` to pick, so the wrong
+  account is never billed silently. Local models work too (`LLM_PROVIDER=ollama`,
+  `LLM_MODEL=llama3.3`), as does any OpenAI-compatible server (`LLM_BASE_URL`).
+  Unless the provider is local, the transcript is sent to it and billed to your key.
 - Security: bound to `127.0.0.1`, non-loopback `Host` and cross-origin requests are
   rejected, only `http(s)` URLs are accepted. Don't expose the port.
-- Config: `TRANSCRIBE_OUTDIR` (default `../transcripts`), `TRANSCRIBE_BIN`,
-  `ANTHROPIC_MODEL` (default `claude-opus-5-5`).
+- Config: `TRANSCRIBE_OUTDIR` (default `../transcripts`), `TRANSCRIBE_BIN`, and
+  `LLM_MODEL` / `LLM_API_KEY` / `LLM_BASE_URL` overrides (see `web/.env.example`).
 - Checks: `npm run typecheck && npm run lint && npm test && npm run build`.
 
 ## Agent-friendly outputs: `md` and `jsonl`

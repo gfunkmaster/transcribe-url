@@ -18,6 +18,14 @@ All notable changes to this project. Format loosely follows
     `claude-opus-5-5` (`ANTHROPIC_MODEL` to override). Server-side fallback is enabled.
   - CI job `web` runs typecheck, lint, tests and build.
 
+### Changed
+
+- **Interpret is provider-agnostic.** Anthropic Claude, DeepSeek, OpenAI, OpenRouter,
+  Ollama and any OpenAI-compatible server sit behind one interface. Set one key and
+  that provider is used; several keys require `LLM_PROVIDER`. Replaces the Claude-only
+  Interpret (`ANTHROPIC_API_KEY` still works unchanged). The UI shows which provider and
+  model will be used, and whether the transcript leaves the machine.
+
 ## [0.6.1] - 2026-10-29
 
 ### Fixed

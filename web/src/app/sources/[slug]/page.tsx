@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import InterpretButton from "@/components/InterpretButton";
 import { getConfig } from "@/lib/config";
 import { readSource } from "@/lib/library";
+import { describeProvider } from "@/lib/llm/registry";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
         )}
       </p>
 
-      <InterpretButton slug={source.slug} hasBrief={source.brief !== null} />
+      <InterpretButton slug={source.slug} hasBrief={source.brief !== null} provider={describeProvider()} />
 
       {source.brief && (
         <section className="brief">
