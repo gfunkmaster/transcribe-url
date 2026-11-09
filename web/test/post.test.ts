@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fetchPost, parsePost, parseTweetUrl, PostError, syndicationToken } from "@/lib/post";
+import { fetchPost, parsePost, parseTweetUrl, PostError, syndicationToken, isArticleLinkOnly } from "@/lib/post";
 import { photoTweet, quoteTweet, tombstone, videoTweet } from "./post-fixtures";
 
 describe("parseTweetUrl", () => {
@@ -77,4 +77,15 @@ describe("fetchPost", () => {
     await expect(fetchPost("1", () => Promise.reject(new TypeError("fetch failed")))).rejects.toThrow(/could not reach X/);
     await expect(fetchPost("1", () => Promise.resolve(new Response("<html>", { status: 200 })))).rejects.toThrow(/unreadable/);
   });
+});
+
+describe("isArticleLinkOnly", () => {
+  it.each(["http://x.com/i/article/2085045081648619520", "https://twitter.com/i/article/123/", "  https://www.x.com/i/article/9\n"])(
+    "detects %s",
+    (t) => expect(isArticleLinkOnly(t)).toBe(true),
+  );
+  it.each(["", "read this https://x.com/i/article/123", "https://x.com/u/status/123456", "https://example.com/i/article/1"])(
+    "ignores %j",
+    (t) => expect(isArticleLinkOnly(t)).toBe(false),
+  );
 });

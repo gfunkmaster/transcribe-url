@@ -28,7 +28,7 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
         )}
       </p>
 
-      <InterpretButton slug={source.slug} hasBrief={source.brief !== null} provider={describeProvider()} imageCount={source.images.length} />
+      <InterpretButton slug={source.slug} hasBrief={source.brief !== null} provider={describeProvider()} imageCount={source.images.length} blockedReason={source.unreadable} />
 
       {source.brief && (
         <section className="brief">

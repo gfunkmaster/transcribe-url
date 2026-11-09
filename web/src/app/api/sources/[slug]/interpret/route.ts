@@ -18,6 +18,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const source = await readSource(config.outdir, slug);
   if (!source) return json({ error: "unknown source (no .md found)" }, 404);
 
+  if (source.unreadable) return json({ error: source.unreadable }, 422);
+
   const payload = (await request.json().catch(() => null)) as { includeImages?: unknown } | null;
   const includeImages = payload?.includeImages === true && source.kind === "post" && source.images.length > 0;
 

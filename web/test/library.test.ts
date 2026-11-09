@@ -88,3 +88,20 @@ describe("isSafeMediaName", () => {
   it.each(["image-1.jpg", "image-12.png", "image-3.webp", "image-4.gif"])("accepts %s", (n) => expect(isSafeMediaName(n)).toBe(true));
   it.each(["../image-1.jpg", "image-1.svg", "image-1.jpg/x", "a.md", "image-.jpg", "image-123.jpg", ".env"])("rejects %s", (n) => expect(isSafeMediaName(n)).toBe(false));
 });
+
+describe("unreadable posts", () => {
+  const post = (body: string) => `---\nextractor: "Twitter"\nkind: "post"\ntitle: "@u - post"\n---\n\n# post\n\n${body}\n`;
+  it("flags a post that is only an X Article link, and nothing else", async () => {
+    for (const [slug, text] of [
+      ["twitter-10", post("http://x.com/i/article/2085045081648619520")],
+      ["twitter-11", post("Look at this https://x.com/i/article/1")],
+      ["twitter-12", post("#AI\nhttps://x.com/i/article/1")],
+    ] as const) {
+      await fs.mkdir(path.join(outdir, slug));
+      await fs.writeFile(path.join(outdir, slug, "a.md"), text);
+    }
+    expect((await readSource(outdir, "twitter-10"))?.unreadable).toContain("X Article");
+    expect((await readSource(outdir, "twitter-11"))?.unreadable).toBeNull();
+    expect((await readSource(outdir, "twitter-12"))?.unreadable).toBeNull();
+  });
+});

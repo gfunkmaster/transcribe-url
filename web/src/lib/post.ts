@@ -43,6 +43,16 @@ export function parseTweetUrl(input: string): { id: string } | null {
   return match?.[1] ? { id: match[1] } : null;
 }
 
+const ARTICLE_LINK = /^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/i\/article\/\d+\/?$/i;
+
+/** True when the whole post text is just a link to an X Article (long-form), which the embed endpoint cannot read. */
+export function isArticleLinkOnly(text: string): boolean {
+  return ARTICLE_LINK.test(text.trim());
+}
+
+export const ARTICLE_NOTICE =
+  "This post is only a link to an X Article, which cannot be read here. Paste the article text into a .txt/.md file and run that instead.";
+
 /** The embed endpoint wants a token derived from the id (same formula X's own embeds use). */
 export function syndicationToken(id: string): string {
   return ((Number(id) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "");

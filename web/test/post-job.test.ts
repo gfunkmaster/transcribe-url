@@ -82,3 +82,18 @@ describe("JobManager with a post handler", () => {
     expect(manager.get(job.id)).toMatchObject({ status: "failed", error: "disk full" });
   });
 });
+
+describe("X Article links", () => {
+  it("saves the post but warns that the article cannot be read", async () => {
+    const tweet = { ...photoTweet, text: "http://x.com/i/article/2085045081648619520", mediaDetails: [], photos: [], entities: {}, display_text_range: undefined };
+    const { result, events } = await run("https://x.com/someone/status/2116870392300073128", router(tweet));
+    expect(result).toBe("handled");
+    expect(events.some((e) => e.event === "error" && "stage" in e && e.stage === "article")).toBe(true);
+  });
+
+  it("does not warn when the post quotes another post", async () => {
+    const tweet = { ...photoTweet, text: "http://x.com/i/article/1", mediaDetails: [], photos: [], entities: {}, display_text_range: undefined, quoted_tweet: { text: "hello", user: { screen_name: "q" } } };
+    const { events } = await run("https://x.com/someone/status/2116870392300073128", router(tweet));
+    expect(events.some((e) => e.event === "error")).toBe(false);
+  });
+});

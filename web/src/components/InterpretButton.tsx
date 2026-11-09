@@ -9,12 +9,15 @@ export default function InterpretButton({
   hasBrief,
   provider,
   imageCount = 0,
+  blockedReason = null,
 }: {
   slug: string;
   hasBrief: boolean;
   provider: ProviderStatus;
   /** Number of saved images (posts only); 0 hides the checkbox. */
   imageCount?: number;
+  /** When set, Interpret is disabled and this explains why. */
+  blockedReason?: string | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -56,7 +59,7 @@ export default function InterpretButton({
 
   return (
     <div>
-      <button type="button" onClick={run} disabled={busy || !provider.ok}>
+      <button type="button" onClick={run} disabled={busy || !provider.ok || blockedReason !== null}>
         {busy ? "Interpreting… (can take a minute)" : hasBrief ? "Re-interpret" : "Interpret"}
       </button>
       {imageCount > 0 && (
@@ -65,7 +68,9 @@ export default function InterpretButton({
           {imageCount} image{imageCount === 1 ? "" : "s"} (needs a model that can read images; if it fails, untick)
         </label>
       )}
-      {provider.ok ? (
+      {blockedReason ? (
+        <p className="err">{blockedReason}</p>
+      ) : provider.ok ? (
         <p className="muted">
           {provider.local
             ? `Runs on ${provider.label} (${provider.model}); the transcript stays on this machine.`
