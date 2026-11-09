@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { ARTICLE_NOTICE, isArticleLinkOnly } from "./post";
 
 export type Meta = Record<string, string>;
 
@@ -26,6 +27,16 @@ export interface SourceDetail extends SourceSummary {
   body: string;
   brief: string | null;
   mdFile: string;
+  /** Why Interpret would be pointless for this source (e.g. a bare X Article link), or null. */
+  unreadable: string | null;
+}
+
+/** A post with no images whose only text is an X Article link has nothing to interpret. */
+export function unreadableReason(kind: string, body: string, imageCount: number): string | null {
+  if (kind !== "post" || imageCount > 0) return null;
+  // Drop only the `# <title>` heading the post reader writes first; later lines are the post's own text.
+  const text = body.replace(/^\s*# .*(?:\r?\n|$)/, "");
+  return isArticleLinkOnly(text) ? ARTICLE_NOTICE : null;
 }
 
 /** yt-dlp titles sometimes carry HTML entities (`Build &amp; Automate`); React would show them literally. */
@@ -135,7 +146,8 @@ export async function readSource(outdir: string, slug: string): Promise<SourceDe
   const brief = await fs.readFile(briefPathFor(md), "utf8").catch(() => null);
   const names = await fs.readdir(/* turbopackIgnore: true */ dir).catch(() => [] as string[]);
   const images = names.filter(isSafeMediaName).sort();
-  return { ...summarise(slug, meta, brief !== null, stat.mtimeMs), images, meta, body, brief, mdFile: md };
+  const summary = summarise(slug, meta, brief !== null, stat.mtimeMs);
+  return { ...summary, images, meta, body, brief, mdFile: md, unreadable: unreadableReason(summary.kind, body, images.length) };
 }
 
 export async function writeBrief(mdFile: string, content: string): Promise<void> {

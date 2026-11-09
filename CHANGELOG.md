@@ -8,6 +8,10 @@ All notable changes to this project. Format loosely follows
 
 ### Added
 
+- **`web/`: X Article links are detected.** A post whose only content is an
+  `x.com/i/article/…` link can't be read, so Interpret is disabled for it with an
+  explanation, the interpret API returns 422 before calling the LLM (no billed call), and
+  the job log warns when it is saved.
 - **`web/` — a local web UI** (Next.js App Router, TypeScript). Paste a URL, watch live
   progress, browse the transcripts in `./transcripts`, and click **Interpret** to write a
   `<name>.brief.md` next to a transcript using the Claude API.

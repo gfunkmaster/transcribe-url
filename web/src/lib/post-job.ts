@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ProgressEvent } from "./events";
-import { fetchPost, parseTweetUrl, PostError, type FetchLike } from "./post";
+import { ARTICLE_NOTICE, fetchPost, isArticleLinkOnly, parseTweetUrl, PostError, type FetchLike } from "./post";
 import { savePost } from "./post-store";
 
 /**
@@ -37,6 +37,7 @@ export function createPostHandler(options: { outdir: string; fetchImpl?: FetchLi
     emit({ event: "item", title: saved.title, dest: saved.dir });
     emit({ event: "wrote", path: saved.mdPath, format: "post" });
     for (const warning of saved.warnings) emit({ event: "error", stage: "image", message: warning });
+    if (isArticleLinkOnly(post.text) && post.images.length === 0 && !post.quoted) emit({ event: "error", stage: "article", message: ARTICLE_NOTICE });
     emit({ event: "done", processed: 1, skipped: 0, outdir: options.outdir, status: "ok" });
     return "handled";
   };
