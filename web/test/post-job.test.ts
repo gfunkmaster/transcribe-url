@@ -42,6 +42,15 @@ describe("post handler", () => {
     expect(again.events.at(-1)).toMatchObject({ skipped: 1 });
   });
 
+  it("re-saves an already saved post when forced", async () => {
+    const url = "https://x.com/someone/status/2116870392300073128";
+    await run(url, router(photoTweet));
+    const events: ProgressEvent[] = [];
+    await createPostHandler({ outdir, fetchImpl: router(photoTweet) })(url, (e) => events.push(e), { force: true });
+    expect(events.map((e) => e.event)).toEqual(["stage", "item", "wrote", "done"]);
+    expect(events.at(-1)).toMatchObject({ processed: 1, skipped: 0 });
+  });
+
   it("passes through videos, non-post URLs and unreadable posts to the CLI", async () => {
     expect((await run("https://x.com/someone/status/2116870392300073128", router(videoTweet))).result).toBe("passthrough");
     expect((await run("https://www.youtube.com/watch?v=abc", router(photoTweet))).result).toBe("passthrough");

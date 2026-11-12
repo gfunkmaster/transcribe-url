@@ -13,6 +13,7 @@ interface Line {
 export default function NewJob() {
   const router = useRouter();
   const [url, setUrl] = useState("");
+  const [force, setForce] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lines, setLines] = useState<Line[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +28,7 @@ export default function NewJob() {
       const response = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, force }),
       });
       const body = (await response.json()) as { job?: { id: string }; error?: string };
       if (!response.ok || !body.job) throw new Error(body.error ?? `request failed (${response.status})`);
@@ -76,6 +77,10 @@ export default function NewJob() {
           {busy ? "Working…" : "Transcribe"}
         </button>
       </form>
+      <label className="muted" style={{ display: "block", margin: "0.5rem 0" }}>
+        <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> Re-run even if already
+        transcribed
+      </label>
       {error && <p className="err">{error}</p>}
       {lines.length > 0 && (
         <ol className="timeline">

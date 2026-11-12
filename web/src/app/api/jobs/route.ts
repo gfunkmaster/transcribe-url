@@ -24,5 +24,6 @@ export async function POST(request: Request) {
   const check = validateUrl((payload as { url?: unknown } | null)?.url);
   if (!check.ok) return json({ error: check.error }, 400);
 
-  return json({ job: jobs().enqueue(check.url) }, 202);
+  const force = (payload as { force?: unknown }).force === true;
+  return json({ job: jobs().enqueue(check.url, { force }) }, 202);
 }

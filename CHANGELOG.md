@@ -8,6 +8,8 @@ All notable changes to this project. Format loosely follows
 
 ### Added
 
+- **`web/`: "Re-run even if already transcribed" checkbox.** Sends `force` with the job: the CLI gets
+  `--force`, and the post reader re-saves instead of skipping.
 - **`web/`: X Article links are detected.** A post whose only content is an
   `x.com/i/article/…` link can't be read, so Interpret is disabled for it with an
   explanation, the interpret API returns 422 before calling the LLM (no billed call), and
