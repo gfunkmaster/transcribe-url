@@ -32,6 +32,17 @@ describe("JobManager", () => {
     delete process.env.FAKE_ARGS_FILE;
   });
 
+  it("passes --force to the CLI only when asked", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tu-jobs-"));
+    process.env.FAKE_ARGS_FILE = path.join(dir, "args.txt");
+    const manager = new JobManager({ bin: FAKE, outdir: "/out" });
+    manager.enqueue("https://example.com/v", { force: true });
+    await manager.idle();
+    const args = (await fs.readFile(process.env.FAKE_ARGS_FILE, "utf8")).trim().split("\n");
+    expect(args).toEqual(["--json-events", "--emit", "md", "--index", "--force", "-o", "/out", "--", "https://example.com/v"]);
+    delete process.env.FAKE_ARGS_FILE;
+  });
+
   it("marks a job failed with the CLI's error message", async () => {
     const manager = new JobManager({ bin: FAKE, outdir: "/out" });
     const job = manager.enqueue("https://x.com/fail");

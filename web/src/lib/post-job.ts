@@ -8,10 +8,14 @@ import { savePost } from "./post-store";
  * 'handled' = the post was read and saved, no CLI run needed.
  * 'passthrough' = not a post, has a video, or X could not be read: let the CLI try.
  */
-export type PostHandler = (url: string, emit: (event: ProgressEvent) => void) => Promise<"handled" | "passthrough">;
+export type PostHandler = (
+  url: string,
+  emit: (event: ProgressEvent) => void,
+  options?: { force?: boolean },
+) => Promise<"handled" | "passthrough">;
 
 export function createPostHandler(options: { outdir: string; fetchImpl?: FetchLike }): PostHandler {
-  return async (url, emit) => {
+  return async (url, emit, runOptions) => {
     const parsed = parseTweetUrl(url);
     if (!parsed) return "passthrough";
 
@@ -26,7 +30,7 @@ export function createPostHandler(options: { outdir: string; fetchImpl?: FetchLi
 
     const dir = path.join(options.outdir, `twitter-${post.id}`);
     const existing = await fs.readdir(dir).catch(() => [] as string[]);
-    if (existing.some((name) => name.endsWith(".md") && !name.endsWith(".brief.md"))) {
+    if (!runOptions?.force && existing.some((name) => name.endsWith(".md") && !name.endsWith(".brief.md"))) {
       emit({ event: "skip", input: url, reason: "already saved" });
       emit({ event: "done", processed: 0, skipped: 1, outdir: options.outdir, status: "ok" });
       return "handled";

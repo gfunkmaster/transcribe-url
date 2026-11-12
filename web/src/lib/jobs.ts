@@ -11,6 +11,8 @@ export interface JobView {
   status: JobStatus;
   createdAt: number;
   error?: string;
+  /** Re-do the work even if the output already exists. */
+  force?: boolean;
 }
 
 /** What a subscriber receives: the CLI's own events, plus synthetic `job` status events. */
@@ -44,7 +46,7 @@ export class JobManager {
 
   constructor(private readonly options: JobManagerOptions) {}
 
-  enqueue(url: string): JobView {
+  enqueue(url: string, options: { force?: boolean } = {}): JobView {
     for (const job of this.jobs.values()) {
       if (job.url === url && (job.status === "queued" || job.status === "running")) return view(job);
     }
@@ -53,6 +55,7 @@ export class JobManager {
       url,
       status: "queued",
       createdAt: Date.now(),
+      ...(options.force ? { force: true } : {}),
       events: [],
       subscribers: new Set(),
     };
@@ -121,7 +124,7 @@ export class JobManager {
     this.emit(job, { event: "job", status: "running" });
     if (this.options.postHandler) {
       try {
-        const result = await this.options.postHandler(job.url, (event) => this.emit(job, event));
+        const result = await this.options.postHandler(job.url, (event) => this.emit(job, event), { force: job.force === true });
         if (result === "handled") {
           job.status = "done";
           this.emit(job, { event: "job", status: "done" });
@@ -165,7 +168,17 @@ export class JobManager {
       // never be interpreted as a flag.
       const child = spawn(
         this.options.bin,
-        ["--json-events", "--emit", "md", "--index", "-o", this.options.outdir, "--", job.url],
+        [
+          "--json-events",
+          "--emit",
+          "md",
+          "--index",
+          ...(job.force ? ["--force"] : []),
+          "-o",
+          this.options.outdir,
+          "--",
+          job.url,
+        ],
         { stdio: ["ignore", "pipe", "pipe"] },
       );
 
