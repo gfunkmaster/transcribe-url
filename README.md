@@ -70,6 +70,7 @@ transcribe-url -o ~/transcripts <URL>                # choose the output directo
 transcribe-url -l en <URL>                           # fix the spoken language
 transcribe-url -f txt,srt,json <URL>                 # pick output formats
 transcribe-url --first-only <URL>                    # tweet with several videos: take the first
+transcribe-url --playlist '<watch?v=…&list=…>'       # whole playlist (default: just the video)
 transcribe-url --cookies-from-browser safari <URL>   # login-gated / rate-limited post
 transcribe-url -k <URL>                              # keep the extracted audio
 transcribe-url ./interview.mp4                       # local file, no download
@@ -158,6 +159,7 @@ strings are escaped; `status` is `ok` or `partial`.
       --window SECONDS       Window width for md/jsonl merging (default: 45)
   -l, --language LANG        Spoken language, e.g. en, sv (default: auto-detect)
       --first-only           Only the first media item of a multi-video post
+      --playlist             watch?v=…&list=… URL: whole playlist (default: that video only)
       --no-condition         Disable condition_on_previous_text (auto for audio ≥ 30 min)
       --cookies-from-browser B   Read cookies from browser B (safari|chrome|firefox|...)
       --word-timestamps      Word-level timestamps (in the json output)

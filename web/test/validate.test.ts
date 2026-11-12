@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateUrl } from "@/lib/validate";
+import { validateUrl, videoInPlaylist } from "@/lib/validate";
 
 describe("validateUrl", () => {
   it("accepts http(s) URLs and normalises them", () => {
@@ -20,5 +20,15 @@ describe("validateUrl", () => {
     ["too long", "https://a.com/" + "a".repeat(2100)],
   ])("rejects %s", (_name, input) => {
     expect(validateUrl(input).ok).toBe(false);
+  });
+});
+
+describe("videoInPlaylist", () => {
+  it("is true only for a URL naming both a video and a playlist", () => {
+    expect(videoInPlaylist("https://www.youtube.com/watch?v=abc&list=PLx&index=2")).toBe(true);
+    expect(videoInPlaylist("https://youtu.be/abc?list=PLx")).toBe(true);
+    expect(videoInPlaylist("https://www.youtube.com/playlist?list=PLx")).toBe(false);
+    expect(videoInPlaylist("https://www.youtube.com/watch?v=abc")).toBe(false);
+    expect(videoInPlaylist("not a url")).toBe(false);
   });
 });

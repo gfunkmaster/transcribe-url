@@ -23,3 +23,19 @@ export function validateUrl(input: unknown): UrlCheck {
   }
   return { ok: true, url: parsed.href };
 }
+
+/**
+ * True for a URL naming both a video and a playlist: YouTube `watch?v=…&list=…` or
+ * `youtu.be/ID?list=…`. The CLI takes only the video unless asked for the playlist.
+ * A plain `playlist?list=…` URL is a playlist, not a video, and returns false.
+ */
+export function videoInPlaylist(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    return false;
+  }
+  if (!parsed.searchParams.has("list")) return false;
+  return parsed.searchParams.has("v") || parsed.hostname === "youtu.be" || parsed.hostname === "www.youtu.be";
+}

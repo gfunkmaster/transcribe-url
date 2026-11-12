@@ -13,6 +13,8 @@ export interface JobView {
   error?: string;
   /** Re-do the work even if the output already exists. */
   force?: boolean;
+  /** For a video URL that also names a playlist: take the whole playlist, not just the video. */
+  playlist?: boolean;
 }
 
 /** What a subscriber receives: the CLI's own events, plus synthetic `job` status events. */
@@ -46,9 +48,18 @@ export class JobManager {
 
   constructor(private readonly options: JobManagerOptions) {}
 
-  enqueue(url: string, options: { force?: boolean } = {}): JobView {
+  enqueue(url: string, options: { force?: boolean; playlist?: boolean } = {}): JobView {
     for (const job of this.jobs.values()) {
-      if (job.url === url && (job.status === "queued" || job.status === "running")) return view(job);
+      // Reuse an active job only if it already does what is asked; a forced or playlist
+      // request must not be swallowed by a plain job for the same URL.
+      if (
+        job.url === url &&
+        (job.status === "queued" || job.status === "running") &&
+        (job.playlist === true) === (options.playlist === true) &&
+        (job.force === true || !options.force)
+      ) {
+        return view(job);
+      }
     }
     const job: Job = {
       id: randomUUID(),
@@ -56,6 +67,7 @@ export class JobManager {
       status: "queued",
       createdAt: Date.now(),
       ...(options.force ? { force: true } : {}),
+      ...(options.playlist ? { playlist: true } : {}),
       events: [],
       subscribers: new Set(),
     };
@@ -174,6 +186,7 @@ export class JobManager {
           "md",
           "--index",
           ...(job.force ? ["--force"] : []),
+          ...(job.playlist ? ["--playlist"] : []),
           "-o",
           this.options.outdir,
           "--",
@@ -202,8 +215,16 @@ export class JobManager {
 }
 
 function view(job: Job): JobView {
-  const { id, url, status, createdAt, error } = job;
-  return { id, url, status, createdAt, ...(error ? { error } : {}) };
+  const { id, url, status, createdAt, error, force, playlist } = job;
+  return {
+    id,
+    url,
+    status,
+    createdAt,
+    ...(error ? { error } : {}),
+    ...(force ? { force } : {}),
+    ...(playlist ? { playlist } : {}),
+  };
 }
 
 const globalKey = Symbol.for("transcribe-url.jobManager");

@@ -43,6 +43,19 @@ describe("JobManager", () => {
     delete process.env.FAKE_ARGS_FILE;
   });
 
+  it("passes --playlist to the CLI only when asked, and reports both flags in the job view", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tu-jobs-"));
+    process.env.FAKE_ARGS_FILE = path.join(dir, "args.txt");
+    const manager = new JobManager({ bin: FAKE, outdir: "/out" });
+    const url = "https://www.youtube.com/watch?v=abc&list=PLx";
+    const job = manager.enqueue(url, { force: true, playlist: true });
+    expect(job).toMatchObject({ force: true, playlist: true });
+    await manager.idle();
+    const args = (await fs.readFile(process.env.FAKE_ARGS_FILE, "utf8")).trim().split("\n");
+    expect(args).toEqual(["--json-events", "--emit", "md", "--index", "--force", "--playlist", "-o", "/out", "--", url]);
+    delete process.env.FAKE_ARGS_FILE;
+  });
+
   it("marks a job failed with the CLI's error message", async () => {
     const manager = new JobManager({ bin: FAKE, outdir: "/out" });
     const job = manager.enqueue("https://x.com/fail");
@@ -76,6 +89,18 @@ describe("JobManager", () => {
     expect(manager.get(b.id)?.status).toBe("queued");
     await manager.idle();
     expect(manager.list().map((j) => j.status)).toEqual(["done", "done"]);
+  });
+
+  it("does not swallow a forced or playlist request into a plain job for the same URL", async () => {
+    const manager = new JobManager({ bin: FAKE, outdir: "/out" });
+    const url = "https://www.youtube.com/watch?v=abc&list=PLx";
+    const plain = manager.enqueue(url);
+    const whole = manager.enqueue(url, { playlist: true });
+    const forced = manager.enqueue(url, { force: true });
+    expect(new Set([plain.id, whole.id, forced.id]).size).toBe(3);
+    expect(manager.enqueue(url, { playlist: true }).id).toBe(whole.id);
+    expect(manager.enqueue(url).id).toBe(plain.id);
+    await manager.idle();
   });
 
   it("returns null when subscribing to an unknown job and replays history to late subscribers", async () => {
