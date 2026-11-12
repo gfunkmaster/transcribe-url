@@ -80,6 +80,10 @@ Options:
                              audio >= 30 minutes)
       --first-only           Only transcribe the first media item (a tweet can
                              contain several videos)
+      --playlist             For a video URL that also names a playlist
+                             (watch?v=…&list=…), transcribe the whole playlist.
+                             Default: only that video. playlist?list=… URLs are
+                             always the whole playlist
       --cookies-from-browser B
                              Read cookies from browser B (safari|chrome|firefox|...)
                              for login-gated or rate-limited posts
@@ -206,6 +210,20 @@ WINDOW="$DEFAULT_WINDOW"
 LANGUAGE=""
 COOKIES_BROWSER=""
 FIRST_ONLY=0
+PLAYLIST=0
+
+# True for a URL naming both a video and a playlist: YouTube watch?v=…&list=… or
+# youtu.be/ID?list=…. A plain playlist?list=… URL is a playlist and returns false.
+video_in_playlist() {
+    case "$1" in
+        *[?\&]list=*) ;;
+        *) return 1 ;;
+    esac
+    case "$1" in
+        *[?\&]v=*|*://youtu.be/*|*://www.youtu.be/*) return 0 ;;
+    esac
+    return 1
+}
 KEEP_AUDIO=0
 NO_CONDITION=0
 WORD_TIMESTAMPS=0
@@ -230,6 +248,7 @@ while [ $# -gt 0 ]; do
         -l|--language)          need_value "$@"; LANGUAGE="$2"; shift 2 ;;
         --cookies-from-browser) need_value "$@"; COOKIES_BROWSER="$2"; shift 2 ;;
         --first-only)           FIRST_ONLY=1; shift ;;
+        --playlist)             PLAYLIST=1; shift ;;
         --no-condition)         NO_CONDITION=1; shift ;;
         --word-timestamps)      WORD_TIMESTAMPS=1; shift ;;
         --chunk)                need_value "$@"; CHUNK_MIN="$2"; shift 2 ;;
@@ -336,6 +355,13 @@ if [ "$DRY_RUN" -eq 1 ]; then
             printf '  local file (no download): %s\n' "$src"
         else
             printf '  download audio + transcribe: %s\n' "$src"
+            if video_in_playlist "$src"; then
+                if [ "$PLAYLIST" -eq 1 ]; then
+                    printf '    playlist: whole list (--playlist)\n'
+                else
+                    printf '    playlist: this video only (pass --playlist for the whole list)\n'
+                fi
+            fi
         fi
     done
     ev dry_run model=s:"$MODEL" outdir=s:"$OUTDIR" formats=s:"$FORMATS_LIST"
@@ -430,6 +456,15 @@ for src in "$@"; do
         fi
         if [ "$FIRST_ONLY" -eq 1 ]; then
             args+=(--playlist-items 1)
+        fi
+        # A video+playlist URL: yt-dlp's default is the whole playlist (hundreds of
+        # downloads). Take only the video unless --playlist. Other URLs are left alone.
+        if video_in_playlist "$src"; then
+            if [ "$PLAYLIST" -eq 1 ]; then
+                args+=(--yes-playlist)
+            else
+                args+=(--no-playlist)
+            fi
         fi
 
         attempt=1

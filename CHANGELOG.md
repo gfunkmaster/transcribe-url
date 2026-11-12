@@ -6,6 +6,16 @@ All notable changes to this project. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `watch?v=…&list=…` link no longer transcribes the whole playlist.** yt-dlp's default
+  took every video in the list (441 for one real link). The video alone is now the default;
+  `--playlist` takes the whole list. `playlist?list=…` links are still whole playlists. The web
+  form shows a "Whole playlist" checkbox for such links, and the job view now reports `force`
+  and `playlist`. Other URLs (X posts included) are passed to yt-dlp unchanged.
+- **`web/`: a forced or playlist request is no longer swallowed** by an already queued or
+  running plain job for the same URL.
+
 ### Added
 
 - **`web/`: "Re-run even if already transcribed" checkbox.** Sends `force` with the job: the CLI gets

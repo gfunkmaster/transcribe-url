@@ -142,6 +142,16 @@ if grep -q 'example.com/b' "$TMP/out" && ! grep -q 'comment' "$TMP/out"; then
 else
     no "batch file parsing wrong"
 fi
+case_ 0 "playlist: this video only" "video+playlist URL defaults to the video only" \
+    "$SCRIPT" --dry-run "https://www.youtube.com/watch?v=abc&list=PLx"
+case_ 0 "playlist: whole list (--playlist)" "--playlist takes the whole list" \
+    "$SCRIPT" --dry-run --playlist "https://www.youtube.com/watch?v=abc&list=PLx"
+"$SCRIPT" --dry-run "https://www.youtube.com/playlist?list=PLx" >"$TMP/out" 2>&1
+if grep -q "playlist:" "$TMP/out"; then
+    no "a plain playlist?list= URL must not claim 'this video only'"
+else
+    ok "a plain playlist?list= URL is not labelled as a single video"
+fi
 case_ 0 "local file (no download)" "--dry-run recognises local files" "$SCRIPT" --dry-run "$ROOT/README.md"
 case_ 1 "batch file not found" "missing batch file is an error" "$SCRIPT" -a "$TMP/nope.txt"
 case_ 1 "whole number" "--chunk rejects non-numeric values" "$SCRIPT" --chunk abc https://example.com
